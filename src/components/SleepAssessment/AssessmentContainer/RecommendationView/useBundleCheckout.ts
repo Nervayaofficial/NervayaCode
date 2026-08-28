@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { ensureRazorpayLoaded } from '@/utils/loadRazorpay';
 import { type AssessmentResult, type ServiceKey, getBundleItems, getTherapyPriority } from '@/utils/sleepAssessment';
 import { cartApi } from '@/lib/api/cart';
 import { useAuth } from '@/hooks/useAuth';
@@ -154,7 +155,11 @@ export function useBundleCheckout({
         router.push(`/order-success/${orderId}`);
         return;
       }
-      if (!window.Razorpay) throw new Error('Payment gateway not loaded. Please try again.');
+      // Load it here rather than assuming a <Script> elsewhere in the tree has
+      // finished. Nothing on this page rendered one at all, so this check used
+      // to fail for every real customer — invisible in tests because the
+      // payment-bypass account returns above without reaching this line.
+      await ensureRazorpayLoaded();
 
       const rzp = new window.Razorpay({
         key: rzpData.data.key_id,

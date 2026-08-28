@@ -15,6 +15,7 @@ import { cartApi } from '@/lib/api/cart';
 import { ITEM_TYPE } from '@/lib/constants/enums';
 import { trackTherapySlotSelected, trackTherapyBooked } from '@/utils/analytics';
 import { RazorpayCheckoutScript } from '@/components/common';
+import { ensureRazorpayLoaded } from '@/utils/loadRazorpay';
 import { useAuth } from '@/hooks/useAuth';
 import { usePhoneGate } from '@/hooks/usePhoneGate';
 import { PhoneCollectionModal } from '@/components/PhoneCollectionModal';
@@ -243,7 +244,11 @@ export default function BookingModal({
           return;
         }
 
-        if (!window.Razorpay) throw new Error('Payment gateway not loaded. Please try again.');
+        // Awaited, not asserted. The <RazorpayCheckoutScript /> below uses
+        // `lazyOnload`, so a quick click can beat it; and when an ad-blocker or
+        // Brave Shields blocks the script outright, this surfaces that instead
+        // of telling the user to retry something that cannot succeed.
+        await ensureRazorpayLoaded();
 
         const options = {
           key: rzpData.data.key_id,
