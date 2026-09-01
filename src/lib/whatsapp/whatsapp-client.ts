@@ -58,6 +58,69 @@ export function hasWhatsAppCredentials(): boolean {
 }
 
 /**
+ * Graph wants the recipient without the leading "+", but a bare national number
+ * is not the same thing as one with the country code stripped — Meta will route
+ * `8409179911` somewhere else entirely, or nowhere. Checkout collects exactly
+ * that shape (10 digits, no country code), so anything shorter than a full
+ * international number is rejected here rather than sent into the void.
+ */
+function toGraphRecipient(toE164: string): string {
+  const digits = toE164.trim().replace(/^\+/, '');
+  if (!/^\d{11,15}$/.test(digits)) {
+    throw new WhatsAppSendError(`Recipient "${toE164}" is not in E.164 form (country code required)`);
+  }
+  return digits;
+}
+
+/**
+ * Upload a file to WhatsApp's own media store and return its media id.
+ *
+ * Preferred over handing Meta a `link`: Meta fetches a link from the public
+ * internet, so any host that answers with anything but a 200 kills the whole
+ * template send — which is exactly how invoice PDFs stopped being delivered
+ * (Cloudinary denies PDF delivery account-wide and answered 401). An uploaded
+ * id needs no public hosting at all, so customer invoices never leave Meta's
+ * store. Ids are valid for 30 days, far longer than the send that follows.
+ */
+export async function uploadWhatsAppMedia(file: Buffer, filename: string, mimeType: string): Promise<string> {
+  const base = readBaseConfig();
+  if (!base) {
+    throw new WhatsAppSendError('WhatsApp is not configured');
+  }
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([new Uint8Array(file)], { type: mimeType }), filename);
+
+  const url = `https://graph.facebook.com/${base.apiVersion}/${base.phoneNumberId}/media`;
+
+  try {
+    const { data } = await axios.post(url, form, {
+      headers: { Authorization: `Bearer ${base.accessToken}` },
+      timeout: 30000,
+    });
+
+    const mediaId = data?.id;
+    if (!mediaId) {
+      throw new WhatsAppSendError('WhatsApp media upload returned no id');
+    }
+    return mediaId;
+  } catch (error) {
+    if (error instanceof WhatsAppSendError) throw error;
+    if (isAxiosError(error)) {
+      const apiError = error.response?.data?.error;
+      throw new WhatsAppSendError(
+        apiError?.message || 'WhatsApp media upload failed',
+        apiError?.code,
+        apiError?.error_subcode,
+      );
+    }
+    throw new WhatsAppSendError('WhatsApp media upload failed');
+  }
+}
+
+/**
  * Send a WhatsApp template message whose body has ordered text variables ({{1}}, {{2}}, ...).
  * Generic helper for utility templates such as the session/consultation meeting-link message.
  *
@@ -65,13 +128,15 @@ export function hasWhatsAppCredentials(): boolean {
  * @param templateName      the APPROVED template name in the WhatsApp Manager.
  * @param templateLanguage  locale the template was approved under (e.g. en_US).
  * @param bodyParams        values for the body variables, in template order.
+ * @param document          an uploaded media `id` (preferred, see uploadWhatsAppMedia) or a
+ *                          publicly fetchable `link`.
  */
 export async function sendDocumentTemplate(
   toE164: string,
   templateName: string,
   templateLanguage: string,
   bodyParams: string[],
-  document: { link: string; filename: string },
+  document: ({ id: string } | { link: string }) & { filename: string },
 ): Promise<{ messageId: string }> {
   return sendTemplate(toE164, templateName, templateLanguage, bodyParams, {
     type: 'header',
@@ -101,7 +166,7 @@ async function sendTemplate(
     throw new WhatsAppSendError('WhatsApp is not configured');
   }
 
-  const to = toE164.replace(/^\+/, '');
+  const to = toGraphRecipient(toE164);
   const url = `https://graph.facebook.com/${base.apiVersion}/${base.phoneNumberId}/messages`;
 
   const payload = {
@@ -174,8 +239,7 @@ export async function sendOtpTemplate(toE164: string, code: string, purpose: str
     throw new WhatsAppSendError('WhatsApp is not configured');
   }
 
-  // Graph API expects the recipient without the leading "+".
-  const to = toE164.replace(/^\+/, '');
+  const to = toGraphRecipient(toE164);
   const url = `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`;
 
   const payload = {

@@ -17,6 +17,7 @@ import { sendRefundNotificationEmail } from '@/lib/services/email/refund-notific
 import { toObjectId } from '@/lib/utils/objectId.util';
 import { hasPaymentBypass } from '@/lib/constants/test-logins';
 import { releaseSlot } from '@/lib/services/slot-hold.service';
+import { runAfterResponse } from '@/lib/utils/after-response.util';
 
 export interface RazorpayOrderResponse {
   id: string;
@@ -226,11 +227,13 @@ async function processPaymentSuccess(orderId: string, paymentId: string) {
       await finalizeSessionBooking(t.session, t.date, t.startTime);
     }
 
-    // Invoice + confirmation, also post-commit (PDF upload, WhatsApp, SMTP).
-    // Fire-and-forget: a notification outage must never fail a paid order.
-    const { sendOrderConfirmation } = await import('@/lib/services/order-confirmation.service');
-    sendOrderConfirmation(orderId).catch((error) => {
-      console.error('[payment] order confirmation failed:', error);
+    // Invoice + confirmation, also post-commit (PDF build, WhatsApp, SMTP).
+    // Deferred rather than merely unawaited: an unawaited promise is killed when
+    // the serverless instance freezes on response, which left paid orders with no
+    // invoice and no message at all.
+    await runAfterResponse('payment:order-confirmation', async () => {
+      const { sendOrderConfirmation } = await import('@/lib/services/order-confirmation.service');
+      await sendOrderConfirmation(orderId);
     });
 
     // Record the purchase against the buyer's CRM lead, also post-commit and

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { ShippingAddress } from '@/types/supplement.types';
 import { Input, Button } from '@/components/common';
+import { useAuth } from '@/hooks/useAuth';
 import styles from './styles.module.css';
 
 interface CheckoutFormProps {
@@ -53,12 +54,21 @@ const validateField = (field: keyof ShippingAddress, value: string): string | un
   }
 };
 
+/** `+919876543210` -> `9876543210`, the 10-digit shape this form stores. */
+function toNationalDigits(phone: string | null | undefined): string {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
 const CheckoutForm: React.FC<CheckoutFormProps> = ({
   onSubmit,
   onCancel,
   loading: _loading = false,
   initialAddress,
 }) => {
+  const { user } = useAuth();
+  const accountPhone = toNationalDigits(user?.phone);
+
   const [formData, setFormData] = useState<ShippingAddress>({
     name: initialAddress?.name || '',
     phone: initialAddress?.phone || '',
@@ -70,6 +80,13 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({
     country: initialAddress?.country || 'India',
   });
 
+  // The account number is a prefill, not a lock: it fills the field until the
+  // customer types, after which their value stands even if they clear it. Derived
+  // rather than written into state so a late AuthContext hydration still lands.
+  const [phoneEdited, setPhoneEdited] = useState(false);
+  const phoneValue = phoneEdited ? formData.phone : formData.phone || accountPhone;
+  const effectiveForm: ShippingAddress = { ...formData, phone: phoneValue };
+
   const [saveAddress, setSaveAddress] = useState(false);
   const [label, setLabel] = useState('Home');
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -78,7 +95,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({
     const nextErrors: FieldErrors = {};
     (Object.keys(formData) as (keyof ShippingAddress)[]).forEach((field) => {
       if (field === 'addressLine2') return;
-      const err = validateField(field, formData[field] || '');
+      const err = validateField(field, effectiveForm[field] || '');
       if (err) nextErrors[field] = err;
     });
     setErrors(nextErrors);
@@ -88,13 +105,16 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (validateAll()) {
-      onSubmit(formData, saveAddress, label);
+      onSubmit(effectiveForm, saveAddress, label);
     }
   };
 
   const handleChange = (field: keyof ShippingAddress, rawValue: string) => {
     let value = rawValue;
-    if (field === 'phone') value = rawValue.replace(/\D/g, '').slice(0, 10);
+    if (field === 'phone') {
+      value = rawValue.replace(/\D/g, '').slice(0, 10);
+      setPhoneEdited(true);
+    }
     if (field === 'zipCode') value = rawValue.replace(/\D/g, '').slice(0, 6);
 
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -105,7 +125,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({
 
   const handleBlur = (field: keyof ShippingAddress) => {
     if (field === 'addressLine2') return;
-    const err = validateField(field, formData[field] || '');
+    const err = validateField(field, effectiveForm[field] || '');
     setErrors((prev) => ({ ...prev, [field]: err }));
   };
 
@@ -129,7 +149,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({
           label="Phone Number"
           type="tel"
           inputMode="numeric"
-          value={formData.phone}
+          value={phoneValue}
           onChange={(e) => handleChange('phone', e.target.value)}
           onBlur={() => handleBlur('phone')}
           error={errors.phone}

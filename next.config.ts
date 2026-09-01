@@ -34,7 +34,10 @@ const nextConfig: NextConfig = {
     ],
   },
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production',
+    // Strip console noise in production but KEEP console.error: the invoice and
+    // WhatsApp failures are reported that way, and stripping them is why broken
+    // order confirmations left no trace in the logs for weeks.
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error'] } : false,
   },
   experimental: {
     optimizePackageImports: ['framer-motion'],

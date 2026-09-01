@@ -41,6 +41,9 @@ export function useCheckout() {
   const phoneGate = usePhoneGate();
   const [error, setError] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<ShippingAddress | undefined>(undefined);
+  // Which saved address is chosen. selectedAddress drops `_id` on the way in, so
+  // the list has nothing to compare against and could never mark a row selected.
+  const [selectedAddressId, setSelectedAddressId] = useState<string | undefined>(undefined);
   const [editingAddress, setEditingAddress] = useState(false);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
@@ -103,12 +106,15 @@ export function useCheckout() {
       } catch {}
     }
     setSelectedAddress(address);
+    // Typed by hand, so it matches no row in the saved list.
+    setSelectedAddressId(undefined);
     setIsAddressModalOpen(false);
     setEditingAddress(false);
   }, []);
 
   const handleAddNewAddress = useCallback(() => {
     setSelectedAddress(undefined);
+    setSelectedAddressId(undefined);
     setEditingAddress(true);
     setIsAddressModalOpen(true);
   }, []);
@@ -116,6 +122,7 @@ export function useCheckout() {
   const handleUseAddress = useCallback((addr: SavedAddress) => {
     const { _id, label: _label, isDefault: _isDefault, ...shippingAddr } = addr;
     setSelectedAddress(shippingAddr as ShippingAddress);
+    setSelectedAddressId(_id);
     setEditingAddress(false);
     setIsAddressModalOpen(false);
   }, []);
@@ -323,6 +330,7 @@ export function useCheckout() {
     creatingOrder,
     savedAddresses,
     selectedAddress,
+    selectedAddressId,
     editingAddress,
     isAddressModalOpen,
     setIsAddressModalOpen,

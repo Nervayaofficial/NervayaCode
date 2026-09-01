@@ -88,6 +88,16 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+.addressItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.addressItem.selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .selectionIndicator {
   flex-shrink: 0;
 }
@@ -103,7 +113,8 @@
   transition: all var(--transition-base);
 }
 
-.addressItem:hover .radioOutline {
+.addressItem:hover .radioOutline,
+.addressItem.selected .radioOutline {
   border-color: var(--accent);
 }
 
@@ -117,7 +128,7 @@
   transition: all var(--transition-base);
 }
 
-.addressItem:active .radioInner {
+.addressItem.selected .radioInner {
   opacity: 1;
   transform: scale(1);
 }

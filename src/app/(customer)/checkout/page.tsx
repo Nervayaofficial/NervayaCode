@@ -30,6 +30,7 @@ export default function CheckoutPage() {
     creatingOrder,
     savedAddresses,
     selectedAddress,
+    selectedAddressId,
     isAddressModalOpen,
     handleCloseAddressModal,
     handleAddNewAddress,
@@ -149,6 +150,7 @@ export default function CheckoutPage() {
 
                 <CheckoutSavedAddresses
                   addresses={savedAddresses}
+                  selectedId={selectedAddressId}
                   onUseAddress={handleUseAddress}
                   onAddNew={handleAddNewAddress}
                 />

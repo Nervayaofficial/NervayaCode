@@ -2,17 +2,24 @@ import connectDB from '@/lib/db/mongodb';
 import Order from '@/lib/models/order.model';
 import User from '@/lib/models/user.model';
 import { nextSequence } from '@/lib/models/counter.model';
-import { uploadMedia } from '@/lib/services/cloudinary.service';
 import { buildInvoicePdf, type InvoiceData, type InvoiceLine } from '@/lib/pdf/invoice-pdf';
 import { ITEM_TYPE } from '@/lib/constants/enums';
 import { toObjectId } from '@/lib/utils/objectId.util';
 
 export interface PreparedInvoice {
   invoiceNumber: string;
-  /** Cloudinary URL — WhatsApp needs a public link for a document header. */
-  invoiceUrl: string;
   pdf: Buffer;
   data: InvoiceData;
+  /**
+   * Where the WhatsApp confirmation goes — the account's OTP-verified number,
+   * never the one typed into the shipping form.
+   *
+   * These are not the same thing and must not be conflated: the checkout field
+   * is a courier contact stored as bare 10 digits with no country code, and in
+   * practice it usually belongs to someone else (the recipient, a relative).
+   * Only the account number is verified, E.164, and known to be on WhatsApp.
+   */
+  whatsappPhone?: string;
 }
 
 /**
@@ -56,8 +63,12 @@ function isTherapyOnly(items: { itemType: string }[]): boolean {
 }
 
 /**
- * Builds (and stores) the invoice for a paid order. Returns null when the order
- * is missing or is therapy-only.
+ * Builds the invoice PDF for a paid order and records its number on the order.
+ * Returns null when the order is missing or is therapy-only.
+ *
+ * The PDF is returned as a buffer and never uploaded to public storage: WhatsApp
+ * takes it through Meta's own media store and email attaches it directly, so a
+ * customer's invoice is not sitting behind a public URL.
  *
  * Idempotent on the invoice number: an order that already has one keeps it, so
  * a retry never burns a second number or renumbers a document the customer has.
@@ -98,8 +109,9 @@ export async function prepareInvoiceForOrder(orderId: string): Promise<PreparedI
     paymentReference: order.paymentId,
     customer: {
       name: address?.name || user?.name || 'Customer',
-      // The shipping address carries its own phone, so an account without one
-      // still invoices correctly. `|| undefined` collapses the null case.
+      // Printed on the invoice as the delivery contact — the courier's number to
+      // ring, which is why the shipping form's value wins here. This is a display
+      // detail only; `whatsappPhone` below decides where the message is sent.
       phone: address?.phone || user?.phone || undefined,
       email: user?.email ?? undefined,
       addressLines: address
@@ -120,9 +132,8 @@ export async function prepareInvoiceForOrder(orderId: string): Promise<PreparedI
   };
 
   const pdf = await buildInvoicePdf(data);
-  const invoiceUrl = await uploadMedia(pdf);
 
-  await Order.findByIdAndUpdate(orderId, { invoiceNumber, invoiceUrl });
+  await Order.findByIdAndUpdate(orderId, { invoiceNumber });
 
-  return { invoiceNumber, invoiceUrl, pdf, data };
+  return { invoiceNumber, pdf, data, whatsappPhone: user?.phone ?? undefined };
 }

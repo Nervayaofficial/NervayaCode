@@ -5,11 +5,13 @@ import styles from './styles.module.css';
 
 interface CheckoutSavedAddressesProps {
   addresses: SavedAddress[];
+  /** `_id` of the chosen address, so the list can show which one is active. */
+  selectedId?: string;
   onUseAddress: (addr: SavedAddress) => void;
   onAddNew: () => void;
 }
 
-export function CheckoutSavedAddresses({ addresses, onUseAddress, onAddNew }: CheckoutSavedAddressesProps) {
+export function CheckoutSavedAddresses({ addresses, selectedId, onUseAddress, onAddNew }: CheckoutSavedAddressesProps) {
   return (
     <div className={styles.savedAddresses}>
       <div className={styles.sectionHeader}>
@@ -26,43 +28,47 @@ export function CheckoutSavedAddresses({ addresses, onUseAddress, onAddNew }: Ch
       </div>
 
       {addresses.length > 0 ? (
-        <ul className={styles.addressList} aria-label="Saved addresses">
-          {addresses.map((addr) => (
-            <li
-              key={addr._id}
-              className={styles.addressItem}
-              onClick={() => onUseAddress(addr)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onUseAddress(addr);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className={styles.selectionIndicator}>
-                <div className={styles.radioOutline}>
-                  <div className={styles.radioInner} />
+        <ul className={styles.addressList} role="radiogroup" aria-label="Saved addresses">
+          {addresses.map((addr) => {
+            const isSelected = addr._id === selectedId;
+            return (
+              <li
+                key={addr._id}
+                className={`${styles.addressItem} ${isSelected ? styles.selected : ''}`}
+                onClick={() => onUseAddress(addr)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onUseAddress(addr);
+                  }
+                }}
+                role="radio"
+                aria-checked={isSelected}
+                tabIndex={isSelected || (!selectedId && addr === addresses[0]) ? 0 : -1}
+              >
+                <div className={styles.selectionIndicator}>
+                  <div className={styles.radioOutline}>
+                    <div className={styles.radioInner} />
+                  </div>
                 </div>
-              </div>
-              <div className={styles.addressInfo}>
-                <div className={styles.addressMain}>
-                  <span className={styles.addressName}>{addr.name}</span>
-                  <span className={styles.addressLabel}>{addr.label}</span>
-                  {addr.isDefault && <span className={styles.defaultBadge}>Default</span>}
+                <div className={styles.addressInfo}>
+                  <div className={styles.addressMain}>
+                    <span className={styles.addressName}>{addr.name}</span>
+                    <span className={styles.addressLabel}>{addr.label}</span>
+                    {addr.isDefault && <span className={styles.defaultBadge}>Default</span>}
+                  </div>
+                  <p className={styles.addressDetails}>
+                    {addr.addressLine1}, {addr.addressLine2 ? `${addr.addressLine2}, ` : ''}
+                    {addr.city}, {addr.state} {addr.zipCode}
+                  </p>
                 </div>
-                <p className={styles.addressDetails}>
-                  {addr.addressLine1}, {addr.addressLine2 ? `${addr.addressLine2}, ` : ''}
-                  {addr.city}, {addr.state} {addr.zipCode}
-                </p>
-              </div>
-              <div className={styles.phoneInfo}>
-                <span className={styles.phoneLabel}>Phone:</span>
-                <span className={styles.phoneText}>{addr.phone}</span>
-              </div>
-            </li>
-          ))}
+                <div className={styles.phoneInfo}>
+                  <span className={styles.phoneLabel}>Phone:</span>
+                  <span className={styles.phoneText}>{addr.phone}</span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <div className={styles.emptyAddresses}>

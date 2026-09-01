@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import { prepareInvoiceForOrder } from '@/lib/services/invoice.service';
-import { sendDocumentTemplate } from '@/lib/whatsapp/whatsapp-client';
+import { sendDocumentTemplate, uploadWhatsAppMedia } from '@/lib/whatsapp/whatsapp-client';
 import { WHATSAPP_TEMPLATES } from '@/lib/constants/whatsapp-templates';
 import { orderConfirmationEmail } from '@/lib/email/templates/order-confirmation';
 import { isNoSendTestEmail } from '@/lib/constants/test-logins';
@@ -26,9 +26,19 @@ function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || 'there';
 }
 
-async function sendWhatsApp(data: InvoiceData, invoiceUrl: string): Promise<void> {
-  const phone = data.customer.phone;
+/** `NRV-2026-27-0042.pdf` — the name the customer sees on the attachment. */
+function pdfFilename(invoiceNumber: string): string {
+  return `${invoiceNumber.replace(/\//g, '-')}.pdf`;
+}
+
+async function sendWhatsApp(data: InvoiceData, pdf: Buffer, phone: string | undefined): Promise<void> {
   if (!phone) return;
+
+  // Upload to Meta's media store rather than passing a link: a link makes
+  // delivery depend on a public host staying reachable, and one that answers
+  // non-200 fails the entire template send — message and PDF both.
+  const filename = pdfFilename(data.invoiceNumber);
+  const mediaId = await uploadWhatsAppMedia(pdf, filename, 'application/pdf');
 
   const template = WHATSAPP_TEMPLATES.ORDER_CONFIRMATION;
   await sendDocumentTemplate(
@@ -36,7 +46,7 @@ async function sendWhatsApp(data: InvoiceData, invoiceUrl: string): Promise<void
     template.name,
     template.language,
     [firstName(data.customer.name), data.orderNumber, itemSummary(data), money(data.total)],
-    { link: invoiceUrl, filename: `${data.invoiceNumber.replace(/\//g, '-')}.pdf` },
+    { id: mediaId, filename },
   );
 }
 
@@ -74,9 +84,7 @@ async function sendEmail(data: InvoiceData, pdf: Buffer): Promise<void> {
     subject,
     text,
     html,
-    attachments: [
-      { filename: `${data.invoiceNumber.replace(/\//g, '-')}.pdf`, content: pdf, contentType: 'application/pdf' },
-    ],
+    attachments: [{ filename: pdfFilename(data.invoiceNumber), content: pdf, contentType: 'application/pdf' }],
   });
 }
 
@@ -93,9 +101,9 @@ export async function sendOrderConfirmation(orderId: string): Promise<void> {
   const prepared = await prepareInvoiceForOrder(orderId);
   if (!prepared) return;
 
-  const { data, pdf, invoiceUrl } = prepared;
+  const { data, pdf, whatsappPhone } = prepared;
 
-  const results = await Promise.allSettled([sendWhatsApp(data, invoiceUrl), sendEmail(data, pdf)]);
+  const results = await Promise.allSettled([sendWhatsApp(data, pdf, whatsappPhone), sendEmail(data, pdf)]);
   for (const [index, result] of results.entries()) {
     if (result.status === 'rejected') {
       console.error(`[order-confirmation] ${index === 0 ? 'WhatsApp' : 'email'} failed for ${orderId}:`, result.reason);
