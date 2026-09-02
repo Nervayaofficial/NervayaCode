@@ -32,22 +32,29 @@ function pdfFilename(invoiceNumber: string): string {
 }
 
 async function sendWhatsApp(data: InvoiceData, pdf: Buffer, phone: string | undefined): Promise<void> {
-  if (!phone) return;
+  if (!phone) {
+    console.warn(`[order-confirmation] skipped WhatsApp for ${data.orderNumber}: user has no phone`);
+    return;
+  }
 
   // Upload to Meta's media store rather than passing a link: a link makes
   // delivery depend on a public host staying reachable, and one that answers
   // non-200 fails the entire template send — message and PDF both.
   const filename = pdfFilename(data.invoiceNumber);
   const mediaId = await uploadWhatsAppMedia(pdf, filename, 'application/pdf');
+  console.warn(`[order-confirmation] media uploaded ${mediaId} for ${data.orderNumber}`);
 
   const template = WHATSAPP_TEMPLATES.ORDER_CONFIRMATION;
-  await sendDocumentTemplate(
+  const { messageId } = await sendDocumentTemplate(
     phone,
     template.name,
     template.language,
     [firstName(data.customer.name), data.orderNumber, itemSummary(data), money(data.total)],
     { id: mediaId, filename },
   );
+  // The wamid cross-references Meta and the whatsappwebhookevent collection —
+  // a send accepted here but never delivered shows up as a status event there.
+  console.warn(`[order-confirmation] WhatsApp sent ${messageId} for ${data.orderNumber}`);
 }
 
 async function sendEmail(data: InvoiceData, pdf: Buffer): Promise<void> {
@@ -98,8 +105,14 @@ async function sendEmail(data: InvoiceData, pdf: Buffer): Promise<void> {
  * the WhatsApp message, and neither must ever fail the order.
  */
 export async function sendOrderConfirmation(orderId: string): Promise<void> {
+  // Breadcrumbs (console.warn survives prod builds): one test order in Vercel
+  // logs names the exact layer a silent failure died in.
+  console.warn(`[order-confirmation] started for ${orderId}`);
   const prepared = await prepareInvoiceForOrder(orderId);
-  if (!prepared) return;
+  if (!prepared) {
+    console.warn(`[order-confirmation] skipped for ${orderId}: no invoice (therapy-only or order not found)`);
+    return;
+  }
 
   const { data, pdf, whatsappPhone } = prepared;
 

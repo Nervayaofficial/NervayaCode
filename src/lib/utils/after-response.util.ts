@@ -26,7 +26,11 @@ export async function runAfterResponse(label: string, task: () => Promise<void>)
 
   try {
     after(guarded);
+    // Breadcrumb (kept in prod builds): distinguishes "scheduled but the
+    // platform never ran it" from "never scheduled" when reading Vercel logs.
+    console.warn(`[${label}] scheduled via after()`);
   } catch {
+    console.warn(`[${label}] no request scope — running inline`);
     await guarded();
   }
 }

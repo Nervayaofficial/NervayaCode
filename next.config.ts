@@ -34,10 +34,13 @@ const nextConfig: NextConfig = {
     ],
   },
   compiler: {
-    // Strip console noise in production but KEEP console.error: the invoice and
-    // WhatsApp failures are reported that way, and stripping them is why broken
-    // order confirmations left no trace in the logs for weeks.
-    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error'] } : false,
+    // Strip console noise in production but KEEP error AND warn: failures are
+    // reported via console.error (stripping them is why broken order
+    // confirmations left no trace for weeks), and the delivery-chain
+    // breadcrumbs (order-confirmation.service, after-response.util) use
+    // console.warn — without them a run killed mid-flight is indistinguishable
+    // from one that never started.
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
   },
   experimental: {
     optimizePackageImports: ['framer-motion'],
