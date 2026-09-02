@@ -257,7 +257,16 @@ function drawFooter(doc: Doc, top: number): void {
 export function buildInvoicePdf(data: InvoiceData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: PAGE_MARGIN, info: { Title: data.invoiceNumber } });
+      // `font:` in the constructor replaces the default Helvetica load. Without
+      // it pdfkit resolves `#standard-fonts/Helvetica` — a wildcard subpath
+      // import Vercel's file tracer cannot follow — and the whole PDF build
+      // dies with MODULE_NOT_FOUND in production while working locally.
+      const doc = new PDFDocument({
+        size: 'A4',
+        margin: PAGE_MARGIN,
+        font: FONT_PATH,
+        info: { Title: data.invoiceNumber },
+      });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
