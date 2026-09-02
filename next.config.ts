@@ -5,8 +5,12 @@ const nextConfig: NextConfig = {
   // The invoice PDF reads its embedded font from disk at runtime. Next only
   // traces files it sees imported, so without this the TTF is absent from the
   // serverless bundle and invoices fail in production while working locally.
+  // pdfkit's built-in fonts load through a wildcard subpath import
+  // (`#standard-fonts/*`) the tracer can't follow either — the invoice never
+  // uses them (constructor gets the Geist TTF), but keep them traced so no
+  // future pdfkit code path can die with MODULE_NOT_FOUND only in production.
   outputFileTracingIncludes: {
-    '/api/**': ['./src/lib/pdf/fonts/**'],
+    '/api/**': ['./src/lib/pdf/fonts/**', './node_modules/pdfkit/js/standard-fonts/**'],
   },
   images: {
     unoptimized: false,
