@@ -14,8 +14,11 @@ export interface GstSplit {
   gross: number;
   /** Gross minus tax: the value the tax was computed on. */
   taxableValue: number;
+  /** Intra-state halves. Zero on an inter-state supply. */
   cgst: number;
   sgst: number;
+  /** The whole tax on an inter-state supply. Zero intra-state. */
+  igst: number;
 }
 
 function toPaise(rupees: number): number {
@@ -34,30 +37,43 @@ function toRupees(paise: number): number {
  * property is why the tax is derived as `gross - taxable` rather than
  * `taxable * rate` — the latter can leave a paisa unaccounted for.
  *
- * An odd paisa goes to CGST (`ceil` on the half), matching the ₹799 @ 5% case
- * where ₹38.05 of tax splits as 19.03 / 19.02.
- *
- * ⚠️ Intra-state only. A supply to another state is IGST at the full rate, not a
- * CGST/SGST pair, and this does not model that — see the note on
- * `COMPANY.stateOfSupply`.
+ * Intra-state, an odd paisa goes to CGST (`ceil` on the half), matching the
+ * ₹799 @ 5% case where ₹38.05 of tax splits as 19.03 / 19.02. Inter-state there
+ * is nothing to halve: the whole amount is IGST at the full rate. The total tax
+ * is identical either way — only its attribution differs, which is what the
+ * return depends on.
  */
-export function splitInclusiveGst(gross: number, rate: number): GstSplit {
+export function splitInclusiveGst(gross: number, rate: number, interState = false): GstSplit {
   const grossPaise = toPaise(gross);
+  const grossRupees = toRupees(grossPaise);
 
   if (rate <= 0) {
-    return { rate, gross: toRupees(grossPaise), taxableValue: toRupees(grossPaise), cgst: 0, sgst: 0 };
+    return { rate, gross: grossRupees, taxableValue: grossRupees, cgst: 0, sgst: 0, igst: 0 };
   }
 
   const taxablePaise = Math.round(grossPaise / (1 + rate));
   const taxPaise = grossPaise - taxablePaise;
+
+  if (interState) {
+    return {
+      rate,
+      gross: grossRupees,
+      taxableValue: toRupees(taxablePaise),
+      cgst: 0,
+      sgst: 0,
+      igst: toRupees(taxPaise),
+    };
+  }
+
   const cgstPaise = Math.ceil(taxPaise / 2);
 
   return {
     rate,
-    gross: toRupees(grossPaise),
+    gross: grossRupees,
     taxableValue: toRupees(taxablePaise),
     cgst: toRupees(cgstPaise),
     sgst: toRupees(taxPaise - cgstPaise),
+    igst: 0,
   };
 }
 

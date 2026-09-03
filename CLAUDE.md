@@ -89,7 +89,11 @@ The arithmetic is in `src/lib/utils/gst.util.ts` and runs in **integer paise**. 
 
 The PDF is split three ways — `invoice-theme.ts` (geometry, palette, `money`, faux-bold), `invoice-table.ts` (column specs, rows, totals), `invoice-pdf.ts` (types, header, bill-to, footer, orchestration).
 
-⚠️ **IGST is not implemented.** `COMPANY.stateOfSupply` is fixed at Karnataka, so an out-of-state order is invoiced as CGST + SGST when it should be a single IGST line. The customer is charged the correct total either way; it is the return that would be wrong. Fixing it means deriving place of supply from `shippingAddress.state`. HSN/SAC codes are also absent by choice — no column for them yet.
+**Place of supply and IGST.** `resolvePlaceOfSupply` (`src/lib/constants/india-states.constants.ts`) derives the recipient's state per order from the **PIN code**, not the typed state — `zipCode` is validated as six digits at checkout while `state` is a free-text input holding "KA" and "Bangalore" in real data. Karnataka (`29`) means CGST+SGST; anything else means a single IGST line at the full rate, and the PDF swaps to a seven-column layout for it. Total tax is identical either way; only its attribution changes, which is what the return depends on.
+
+Several PIN prefixes map to more than one state — `20`–`28` is UP _and_ Uttarakhand, `80`–`85` is Bihar _and_ Jharkhand, `682` is Kochi _and_ Lakshadweep, `16` is Chandigarh _and_ Mohali. This does not affect the tax split, because no ambiguous set contains Karnataka, so intra vs inter-state is still exact; the typed state only breaks the tie for the printed NAME. Orders with no address at all (Deep Rest, therapy) fall back to the seller's state, which is what the law prescribes when there is no address on record. A PIN/state conflict logs a warning and trusts the PIN.
+
+⚠️ **No HSN/SAC codes.** Rule 46 lists them as mandatory, so the invoice is formally deficient until they are added — there is no column for them yet, by choice.
 
 ### "Deep Rest" / "Drift Off" Naming
 

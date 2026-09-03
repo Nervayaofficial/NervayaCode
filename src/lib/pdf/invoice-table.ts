@@ -28,7 +28,7 @@ export interface InvoiceLine {
 }
 
 interface Column {
-  key: 'item' | 'qty' | 'rate' | 'taxable' | 'gst' | 'cgst' | 'sgst' | 'amount';
+  key: 'item' | 'qty' | 'rate' | 'taxable' | 'gst' | 'cgst' | 'sgst' | 'igst' | 'amount';
   /** Two lines where a single word won't fit the width. */
   label: string;
   x: number;
@@ -52,6 +52,16 @@ const PLAIN_COLUMNS: Column[] = [
   { key: 'amount', label: 'AMOUNT', x: PAGE_MARGIN + 410, width: 79, align: 'right' },
 ];
 
+const IGST_COLUMNS: Column[] = [
+  { key: 'item', label: 'ITEM & DESCRIPTION', x: PAGE_MARGIN + 8, width: 186 },
+  { key: 'qty', label: 'QTY', x: PAGE_MARGIN + 196, width: 20, align: 'right' },
+  { key: 'rate', label: 'RATE\n(INCL.)', x: PAGE_MARGIN + 218, width: 58, align: 'right' },
+  { key: 'taxable', label: 'TAXABLE\nVALUE', x: PAGE_MARGIN + 280, width: 60, align: 'right' },
+  { key: 'gst', label: 'GST', x: PAGE_MARGIN + 342, width: 28, align: 'right' },
+  { key: 'igst', label: 'IGST', x: PAGE_MARGIN + 372, width: 55, align: 'right' },
+  { key: 'amount', label: 'TOTAL', x: PAGE_MARGIN + 430, width: 59, align: 'right' },
+];
+
 const TAX_COLUMNS: Column[] = [
   { key: 'item', label: 'ITEM & DESCRIPTION', x: PAGE_MARGIN + 8, width: 138 },
   { key: 'qty', label: 'QTY', x: PAGE_MARGIN + 148, width: 20, align: 'right' },
@@ -67,16 +77,25 @@ export function isTaxInvoice(): boolean {
   return Boolean(COMPANY.gstin);
 }
 
-export function invoiceColumns(): Column[] {
-  return isTaxInvoice() ? TAX_COLUMNS : PLAIN_COLUMNS;
+/**
+ * An invoice is entirely intra- or inter-state — place of supply is a property of
+ * the supply, not of a line — so one look at the first line decides the layout.
+ */
+function isInterState(lines: InvoiceLine[]): boolean {
+  return lines.some((line) => line.tax.igst > 0);
+}
+
+export function invoiceColumns(lines: InvoiceLine[]): Column[] {
+  if (!isTaxInvoice()) return PLAIN_COLUMNS;
+  return isInterState(lines) ? IGST_COLUMNS : TAX_COLUMNS;
 }
 
 const HEAD_HEIGHT = 28;
 
-export function drawTableHeader(doc: Doc, top: number): number {
-  const columns = invoiceColumns();
+export function drawTableHeader(doc: Doc, top: number, lines: InvoiceLine[]): number {
+  const columns = invoiceColumns(lines);
   doc.rect(PAGE_MARGIN, top, CONTENT_WIDTH, HEAD_HEIGHT).fill(TABLE_HEAD_BG);
-  doc.font(FONT).fontSize(6.5).fillColor(MUTED);
+  doc.font(FONT).fontSize(7).fillColor(INK);
 
   const y = top + 7;
   for (const column of columns) {
@@ -104,6 +123,8 @@ function cellValue(column: Column, line: InvoiceLine): string {
       return money(line.tax.cgst);
     case 'sgst':
       return money(line.tax.sgst);
+    case 'igst':
+      return money(line.tax.igst);
     case 'amount':
       // The gross the tax was split out of, which is what the customer paid for
       // this line — not `unitPrice * quantity`, because a whole-order promo has
@@ -114,8 +135,8 @@ function cellValue(column: Column, line: InvoiceLine): string {
   }
 }
 
-export function drawLine(doc: Doc, line: InvoiceLine, top: number): number {
-  const columns = invoiceColumns();
+export function drawLine(doc: Doc, line: InvoiceLine, top: number, lines: InvoiceLine[]): number {
+  const columns = invoiceColumns(lines);
   const itemColumn = columns[0];
   const size = isTaxInvoice() ? 8 : 9.5;
   const y = top + 9;
@@ -166,49 +187,93 @@ export interface TotalsData {
  * split. If these three ever stop adding up to `total`, the cause is a gross
  * amount that never reached the tax calculation — not a rounding drift.
  */
-function taxTotals(data: TotalsData): { taxable: number; cgst: number; sgst: number } {
+function taxTotals(data: TotalsData): { taxable: number; cgst: number; sgst: number; igst: number } {
   const rows: GstSplit[] = [...data.lines.map((line) => line.tax)];
   if (data.extrasTax) rows.push(data.extrasTax);
 
   const sum = (pick: (row: GstSplit) => number): number =>
     Math.round(rows.reduce((total, row) => total + pick(row), 0) * 100) / 100;
 
-  return { taxable: sum((r) => r.taxableValue), cgst: sum((r) => r.cgst), sgst: sum((r) => r.sgst) };
+  return {
+    taxable: sum((r) => r.taxableValue),
+    cgst: sum((r) => r.cgst),
+    sgst: sum((r) => r.sgst),
+    igst: sum((r) => r.igst),
+  };
 }
 
 export function drawTotals(doc: Doc, data: TotalsData, top: number): number {
-  const grossSubtotal = data.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
-  const rows: [string, string][] = [['Subtotal', money(grossSubtotal)]];
-
-  if (data.promoDiscount && data.promoDiscount > 0) {
-    rows.push([data.promoCode ? `Discount (${data.promoCode})` : 'Discount', `−${money(data.promoDiscount)}`]);
-
-    // Names the figure the TOTAL column actually adds up to. A whole-order promo
-    // is apportioned into the lines before tax is backed out, so each line shows
-    // its share already deducted — without this row the item column visibly
-    // fails to sum to Subtotal and the invoice looks wrong.
-    const netOfDiscount = Math.round(data.lines.reduce((sum, line) => sum + line.tax.gross, 0) * 100) / 100;
-    rows.push(['Amount after discount', money(netOfDiscount)]);
-  }
-  if (data.extras && data.extras !== 0) {
-    rows.push(['Shipping & handling', money(data.extras)]);
-  }
-
-  if (isTaxInvoice()) {
-    const { taxable, cgst, sgst } = taxTotals(data);
-    rows.push(['Taxable value', money(taxable)], ['CGST', money(cgst)], ['SGST', money(sgst)]);
-  }
-
   const boxX = PAGE_MARGIN + CONTENT_WIDTH / 2;
   const boxW = CONTENT_WIDTH / 2;
-  let y = top + 12;
 
-  doc.font(FONT).fontSize(9.5);
-  for (const [label, value] of rows) {
-    doc.fillColor(MUTED).text(label, boxX, y, { width: boxW - 100 });
-    doc.fillColor(INK).text(value, boxX + boxW - 100, y, { width: 100, align: 'right' });
-    y += 17;
+  /**
+   * Two groups, in the order Rule 46 requires: how the money was arrived at,
+   * then taxable value -> tax -> total invoice value.
+   *
+   * The chain has to ADD UP to the total. An earlier version led with a
+   * tax-inclusive "Subtotal" and then restated the same figure as the Total,
+   * with the taxable value floating in between — three rows that each looked
+   * like a subtotal and no visible arithmetic between them.
+   *
+   * The gross group is shown only when a discount or a delivery charge actually
+   * moved the number; with neither, "items total" and "total invoice value" are
+   * the same figure and printing both twice explains nothing.
+   */
+  const grossRows: [string, string][] = [];
+  const hasAdjustments = Boolean((data.promoDiscount && data.promoDiscount > 0) || (data.extras && data.extras !== 0));
+
+  if (hasAdjustments) {
+    const itemsGross = data.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+    grossRows.push(['Items (incl. GST)', money(itemsGross)]);
+
+    if (data.promoDiscount && data.promoDiscount > 0) {
+      grossRows.push([data.promoCode ? `Discount (${data.promoCode})` : 'Discount', `−${money(data.promoDiscount)}`]);
+    }
+    if (data.extras && data.extras !== 0) {
+      grossRows.push(['Shipping & handling', money(data.extras)]);
+    }
   }
+
+  const taxRows: [string, string][] = [];
+  if (isTaxInvoice()) {
+    const { taxable, cgst, sgst, igst } = taxTotals(data);
+    // "Taxable value" is the Rule 46 term: the base after discount, before tax.
+    taxRows.push(['Taxable value', money(taxable)]);
+    if (isInterState(data.lines)) {
+      taxRows.push(['IGST', money(igst)]);
+    } else {
+      taxRows.push(['CGST', money(cgst)], ['SGST', money(sgst)]);
+    }
+  } else {
+    taxRows.push(['Subtotal', money(data.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0))]);
+  }
+
+  let y = top + 12;
+  doc.font(FONT).fontSize(9.5);
+
+  const drawRows = (rows: [string, string][]): void => {
+    for (const [label, value] of rows) {
+      doc.fillColor(MUTED).text(label, boxX, y, { width: boxW - 100 });
+      doc.fillColor(INK).text(value, boxX + boxW - 100, y, { width: 100, align: 'right' });
+      y += 17;
+    }
+  };
+
+  drawRows(grossRows);
+
+  // Hairline between the two groups, so the tax chain reads as its own sum
+  // rather than as more adjustments to the line above.
+  if (grossRows.length) {
+    doc
+      .moveTo(boxX, y + 1)
+      .lineTo(boxX + boxW, y + 1)
+      .strokeColor(RULE)
+      .lineWidth(0.5)
+      .stroke();
+    y += 8;
+  }
+
+  drawRows(taxRows);
 
   // Grand total sits in a tinted band, the way Zoho emphasises the balance.
   doc.rect(boxX, y + 2, boxW, 30).fill(TOTAL_BG);

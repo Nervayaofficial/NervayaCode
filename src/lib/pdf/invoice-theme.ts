@@ -20,8 +20,14 @@ export const PAGE_WIDTH = 595.28; // A4 portrait, points
 export const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 
 export const INK = '#0f172a';
-export const MUTED = '#64748b';
-export const RULE = '#e2e8f0';
+/**
+ * Secondary text. Deliberately dark for a PRINTED document: the slate-500 this
+ * started as (`#64748b`) measures ~4.6:1 on white — passable on a backlit screen,
+ * washed out on paper at the 7–8pt type this invoice uses. This is ~12.6:1, still
+ * a step below INK so the hierarchy survives, but legible in print.
+ */
+export const MUTED = '#1e293b';
+export const RULE = '#cbd5e1';
 export const ACCENT = '#4f31d9';
 export const TABLE_HEAD_BG = '#f1f0fb';
 export const TOTAL_BG = '#f8f7ff';

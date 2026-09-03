@@ -38,6 +38,8 @@ export interface InvoiceData {
   extras?: number;
   /** GST backed out of `extras`, at the rate of the goods it accompanies. */
   extrasTax?: GstSplit;
+  /** Recipient's state, e.g. `Tamil Nadu (33)`. Decides CGST+SGST vs IGST. */
+  placeOfSupply?: string;
   total: number;
 }
 
@@ -73,7 +75,7 @@ function drawHeader(doc: Doc, data: InvoiceData): number {
     ['Status', data.paymentStatus.toUpperCase()],
   ];
   if (isTaxInvoice()) {
-    metaRows.push(['Place of Supply', COMPANY.stateOfSupply], ['Reverse Charge', 'No']);
+    metaRows.push(['Place of Supply', data.placeOfSupply ?? COMPANY.stateOfSupply], ['Reverse Charge', 'No']);
   }
 
   let metaY = PAGE_MARGIN + 36;
@@ -159,16 +161,16 @@ export function buildInvoicePdf(data: InvoiceData): Promise<Buffer> {
 
       let cursor = drawHeader(doc, data);
       cursor = drawBillTo(doc, data, cursor);
-      cursor = drawTableHeader(doc, cursor);
+      cursor = drawTableHeader(doc, cursor, data.lines);
       for (const line of data.lines) {
         // Start a new page before a row would overflow the footer area. The tax
         // layout needs more room below the table (three extra totals rows), so
         // the threshold grows with it.
         if (cursor > doc.page.height - (isTaxInvoice() ? 230 : 170)) {
           doc.addPage();
-          cursor = drawTableHeader(doc, PAGE_MARGIN);
+          cursor = drawTableHeader(doc, PAGE_MARGIN, data.lines);
         }
-        cursor = drawLine(doc, line, cursor);
+        cursor = drawLine(doc, line, cursor, data.lines);
       }
       cursor = drawTotals(doc, data, cursor);
       drawFooter(doc, cursor);

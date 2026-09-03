@@ -20,16 +20,12 @@ export const COMPANY = {
   /** GST registration. `29` is the Karnataka state code, matching the address. */
   gstin: '29AALCN4069L1ZQ',
   /**
-   * Place of supply printed on the invoice, and the reason the tax splits into
-   * CGST + SGST rather than IGST.
+   * Fallback place of supply only.
    *
-   * ⚠️ Held constant at the seller's state, which is only correct for customers
-   * in Karnataka. An inter-state supply is IGST at the full rate — one line, not
-   * a half-and-half pair — and that is NOT implemented: an out-of-state order is
-   * currently invoiced as if it were local. The total tax is the same either
-   * way, so the customer is charged correctly; it is the return that would be
-   * wrong. Fixing it means deriving this from `shippingAddress.state` and
-   * emitting an IGST column when it differs.
+   * The real value is derived per order from the customer's PIN code
+   * (`resolvePlaceOfSupply`), which is what decides CGST+SGST versus IGST. This
+   * is used when an order carries no address at all — digital-only purchases —
+   * where the law puts the place of supply at the supplier's location anyway.
    */
   stateOfSupply: 'Karnataka (29)',
 } as const;
