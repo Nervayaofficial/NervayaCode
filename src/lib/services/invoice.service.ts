@@ -4,6 +4,9 @@ import User from '@/lib/models/user.model';
 import { nextSequence } from '@/lib/models/counter.model';
 import { buildInvoicePdf, type InvoiceData, type InvoiceLine } from '@/lib/pdf/invoice-pdf';
 import { ITEM_TYPE } from '@/lib/constants/enums';
+import { GST_RATE_SHIPPING, gstRateForItemType } from '@/lib/constants/tax.constants';
+import { resolvePlaceOfSupply } from '@/lib/constants/india-states.constants';
+import { apportionDiscount, splitInclusiveGst } from '@/lib/utils/gst.util';
 import { toObjectId } from '@/lib/utils/objectId.util';
 
 export interface PreparedInvoice {
@@ -90,15 +93,41 @@ export async function prepareInvoiceForOrder(orderId: string): Promise<PreparedI
     .select('name email phone')
     .lean();
 
-  const lines: InvoiceLine[] = order.items.map((item) => ({
-    name: item.name,
-    description: describeItem(item.itemType, item.metadata as Record<string, unknown> | undefined),
-    quantity: item.quantity,
-    unitPrice: item.price,
-  }));
-
-  const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
   const promoDiscount = order.promoDiscount ?? 0;
+
+  // Tax is backed out of what the customer actually PAID, so a whole-order promo
+  // has to reach the lines before the split — otherwise the GST column would
+  // claim more tax than was collected. `extras` (shipping) is taxed too, as a
+  // separate row: it is only ever charged alongside supplements, so it follows
+  // their rate as part of the same composite supply.
+  // Place of supply decides CGST+SGST vs IGST, and it is derived from the PIN
+  // rather than the typed state: the PIN is validated as six digits at checkout,
+  // while `state` is a free-text field that holds "KA" and "Bangalore" in real
+  // data. Digital-only orders carry no address at all and fall back to the
+  // seller's state, which is what the law prescribes with no address on record.
+  const placeOfSupply = resolvePlaceOfSupply({
+    zipCode: order.shippingAddress?.zipCode,
+    state: order.shippingAddress?.state,
+  });
+
+  const grossAmounts = order.items.map((item) => item.price * item.quantity);
+  const discountShares = apportionDiscount(grossAmounts, promoDiscount);
+
+  const lines: InvoiceLine[] = order.items.map((item, index) => {
+    const rate = gstRateForItemType(item.itemType);
+    const netAmount = grossAmounts[index] - discountShares[index];
+
+    return {
+      name: item.name,
+      description: describeItem(item.itemType, item.metadata as Record<string, unknown> | undefined),
+      quantity: item.quantity,
+      unitPrice: item.price,
+      tax: splitInclusiveGst(netAmount, rate, placeOfSupply.interState),
+    };
+  });
+
+  const subtotal = grossAmounts.reduce((sum, amount) => sum + amount, 0);
+  const extras = order.totalAmount - (subtotal - promoDiscount);
   const address = order.shippingAddress;
 
   const data: InvoiceData = {
@@ -127,7 +156,9 @@ export async function prepareInvoiceForOrder(orderId: string): Promise<PreparedI
     promoCode: order.promoCode,
     promoDiscount,
     // Whatever the line items and promo don't account for is shipping/handling.
-    extras: order.totalAmount - (subtotal - promoDiscount),
+    extras,
+    extrasTax: extras > 0 ? splitInclusiveGst(extras, GST_RATE_SHIPPING, placeOfSupply.interState) : undefined,
+    placeOfSupply: placeOfSupply.label,
     total: order.totalAmount,
   };
 
