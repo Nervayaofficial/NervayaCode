@@ -76,6 +76,21 @@ Razorpay with two independent flows:
 
 Client-side checkout hook: `src/hooks/useRazorpayCheckout.ts`.
 
+### GST / Tax Invoices
+
+Every price shown and charged is **GST-inclusive** — tax is backed OUT of the gross, never added on top, so changing a rate changes how a price splits and not what the customer pays. Rates live in `src/lib/constants/tax.constants.ts`: supplements 5%, Deep Rest 18%, therapy Nil (exempt). Shipping follows the supplement rate, because `getShippingCost` only ever applies to carts containing physical goods, making delivery ancillary to a single 5% supply.
+
+The arithmetic is in `src/lib/utils/gst.util.ts` and runs in **integer paise**. Rupee floats lose the half-paisa cases (`19.025` is stored as `19.024999…`, so round-half-up rounds down and the invoice disagrees with Zoho/Tally by a paisa). Two invariants hold by construction, and a break in either means a gross amount never reached the calculation rather than rounding drift:
+
+- `taxableValue + cgst + sgst === gross` per row — tax is derived as `gross - taxable`, not `taxable * rate`.
+- A whole-order promo is apportioned across lines (`apportionDiscount`, remainder to the largest line) **before** the split, so the tax column reflects what was actually collected. The invoice prints an "Amount after discount" row because the per-line TOTAL column shows each line net of its share and would otherwise fail to sum to Subtotal.
+
+`COMPANY.gstin` in `company.constants.ts` is the switch: present, and `invoice-table.ts` renders the eight-column tax layout and titles the document "TAX INVOICE"; cleared to null, both revert to the plain four-column invoice, so tax columns can never appear without the registration number that legitimises them.
+
+The PDF is split three ways — `invoice-theme.ts` (geometry, palette, `money`, faux-bold), `invoice-table.ts` (column specs, rows, totals), `invoice-pdf.ts` (types, header, bill-to, footer, orchestration).
+
+⚠️ **IGST is not implemented.** `COMPANY.stateOfSupply` is fixed at Karnataka, so an out-of-state order is invoiced as CGST + SGST when it should be a single IGST line. The customer is charged the correct total either way; it is the return that would be wrong. Fixing it means deriving place of supply from `shippingAddress.state`. HSN/SAC codes are also absent by choice — no column for them yet.
+
 ### "Deep Rest" / "Drift Off" Naming
 
 The sleep therapy program was renamed from "Drift Off" to "Deep Rest". Code still uses `DriftOff` in models, services, and types. Permanent redirects from `/drift-off*` → `/deep-rest*` in `next.config.ts`.

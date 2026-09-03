@@ -1,38 +1,23 @@
-import path from 'path';
 import PDFDocument from 'pdfkit';
 import { COMPANY, INVOICE_NOTE, INVOICE_TERMS, INVOICE_THANK_YOU } from '@/lib/constants/company.constants';
+import type { GstSplit } from '@/lib/utils/gst.util';
+import {
+  ACCENT,
+  bold,
+  CONTENT_WIDTH,
+  FONT,
+  FONT_PATH,
+  formatDate,
+  INK,
+  MUTED,
+  PAGE_MARGIN,
+  PAGE_WIDTH,
+  RULE,
+  type Doc,
+} from './invoice-theme';
+import { drawLine, drawTableHeader, drawTotals, isTaxInvoice, type InvoiceLine } from './invoice-table';
 
-/**
- * Zoho-Invoice-style PDF built with pdfkit.
- *
- * Font note: the PDF standard fonts (Helvetica et al.) use WinAnsi encoding,
- * which has NO glyph for the rupee sign — `widthOfString('₹')` returns 0 and the
- * character silently renders as nothing. So the invoice embeds Geist, which does
- * carry U+20B9. pdfkit has no synthetic bold and only the regular weight is
- * vendored, so emphasis is done with size, colour and fills, plus a faux-bold
- * double-draw for the few headings that need real weight.
- */
-const FONT_PATH = path.join(process.cwd(), 'src/lib/pdf/fonts/Geist-Regular.ttf');
-const FONT = 'Geist';
-
-const PAGE_MARGIN = 48;
-const PAGE_WIDTH = 595.28; // A4 portrait, points
-const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
-
-const INK = '#0f172a';
-const MUTED = '#64748b';
-const RULE = '#e2e8f0';
-const ACCENT = '#4f31d9';
-const TABLE_HEAD_BG = '#f1f0fb';
-const TOTAL_BG = '#f8f7ff';
-
-export interface InvoiceLine {
-  name: string;
-  /** Shown under the name — item type, or the session date for therapy. */
-  description?: string;
-  quantity: number;
-  unitPrice: number;
-}
+export type { InvoiceLine };
 
 export interface InvoiceData {
   invoiceNumber: string;
@@ -51,31 +36,9 @@ export interface InvoiceData {
   promoDiscount?: number;
   /** Shipping/handling, or anything the line items don't account for. */
   extras?: number;
+  /** GST backed out of `extras`, at the rate of the goods it accompanies. */
+  extrasTax?: GstSplit;
   total: number;
-}
-
-/** `₹1,887.00` — grouped in the Indian digit system. */
-function money(amount: number): string {
-  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-type Doc = InstanceType<typeof PDFDocument>;
-
-/**
- * Faux bold: only the regular weight is vendored, so overdraw the glyphs with a
- * hairline stroke of the same colour to thicken the stems.
- */
-function bold(doc: Doc, text: string, x: number, y: number, options: PDFKit.Mixins.TextOptions = {}): void {
-  doc.text(text, x, y, options);
-  const afterY = doc.y;
-  // Second pass nudged right thickens the stems; too large a delta reads as a
-  // shadow rather than weight.
-  doc.text(text, x + 0.4, y, options);
-  doc.y = afterY;
 }
 
 function drawHeader(doc: Doc, data: InvoiceData): number {
@@ -86,16 +49,21 @@ function drawHeader(doc: Doc, data: InvoiceData): number {
   doc.text(COMPANY.tagline, PAGE_MARGIN, doc.y + 2);
   doc.text(COMPANY.addressLines.join('\n'), PAGE_MARGIN, doc.y + 6, { lineGap: 1.5 });
   doc.text(`${COMPANY.phone}  ·  ${COMPANY.email}  ·  ${COMPANY.website}`, PAGE_MARGIN, doc.y + 4);
+  if (COMPANY.gstin) {
+    doc.fillColor(INK).text(`GSTIN: ${COMPANY.gstin}`, PAGE_MARGIN, doc.y + 4);
+  }
   // Capture the left column's bottom NOW: every doc.text(x, y) below reassigns
   // doc.y, so reading it after the meta block would measure the wrong column and
   // let the divider cut through this address.
   const leftBottom = doc.y;
 
-  // "INVOICE" + meta, right-aligned against the logo block.
+  // Title + meta, right-aligned against the logo block. "TAX INVOICE" only when
+  // a GSTIN backs it up; without one this is a plain invoice and must not claim
+  // otherwise.
   const rightX = PAGE_WIDTH / 2;
   const rightW = CONTENT_WIDTH / 2;
-  doc.fontSize(24).fillColor(INK);
-  bold(doc, 'INVOICE', rightX, PAGE_MARGIN + 2, { width: rightW, align: 'right' });
+  doc.fontSize(isTaxInvoice() ? 20 : 24).fillColor(INK);
+  bold(doc, isTaxInvoice() ? 'TAX INVOICE' : 'INVOICE', rightX, PAGE_MARGIN + 2, { width: rightW, align: 'right' });
 
   doc.fontSize(9).fillColor(MUTED);
   const metaRows: [string, string][] = [
@@ -104,6 +72,10 @@ function drawHeader(doc: Doc, data: InvoiceData): number {
     ['Date', formatDate(data.issuedAt)],
     ['Status', data.paymentStatus.toUpperCase()],
   ];
+  if (isTaxInvoice()) {
+    metaRows.push(['Place of Supply', COMPANY.stateOfSupply], ['Reverse Charge', 'No']);
+  }
+
   let metaY = PAGE_MARGIN + 36;
   for (const [label, value] of metaRows) {
     doc.fillColor(MUTED).text(label, rightX, metaY, { width: rightW - 110, align: 'right' });
@@ -143,95 +115,6 @@ function drawBillTo(doc: Doc, data: InvoiceData, top: number): number {
     cursor = doc.y;
   }
   return cursor + 20;
-}
-
-// Column geometry, shared by the header and every row.
-const COL = {
-  item: PAGE_MARGIN + 10,
-  qty: PAGE_MARGIN + 300,
-  rate: PAGE_MARGIN + 340,
-  amount: PAGE_MARGIN + 410,
-};
-const COL_W = { item: 285, qty: 34, rate: 66, amount: 79 };
-
-function drawTableHeader(doc: Doc, top: number): number {
-  doc.rect(PAGE_MARGIN, top, CONTENT_WIDTH, 24).fill(TABLE_HEAD_BG);
-  doc.font(FONT).fontSize(8).fillColor(MUTED);
-  const y = top + 8;
-  doc.text('ITEM & DESCRIPTION', COL.item, y, { width: COL_W.item, characterSpacing: 0.6 });
-  doc.text('QTY', COL.qty, y, { width: COL_W.qty, align: 'right', characterSpacing: 0.6 });
-  doc.text('RATE', COL.rate, y, { width: COL_W.rate, align: 'right', characterSpacing: 0.6 });
-  doc.text('AMOUNT', COL.amount, y, { width: COL_W.amount, align: 'right', characterSpacing: 0.6 });
-  return top + 24;
-}
-
-function drawLine(doc: Doc, line: InvoiceLine, top: number): number {
-  const y = top + 10;
-  doc.font(FONT).fontSize(9.5).fillColor(INK);
-  doc.text(line.name, COL.item, y, { width: COL_W.item });
-  let bottom = doc.y;
-
-  if (line.description) {
-    doc
-      .fontSize(8)
-      .fillColor(MUTED)
-      .text(line.description, COL.item, bottom + 1, { width: COL_W.item });
-    bottom = doc.y;
-  }
-
-  doc.fontSize(9.5).fillColor(INK);
-  doc.text(String(line.quantity), COL.qty, y, { width: COL_W.qty, align: 'right' });
-  doc.text(money(line.unitPrice), COL.rate, y, { width: COL_W.rate, align: 'right' });
-  doc.text(money(line.unitPrice * line.quantity), COL.amount, y, { width: COL_W.amount, align: 'right' });
-
-  const rowBottom = Math.max(bottom, y + 12) + 10;
-  doc
-    .moveTo(PAGE_MARGIN, rowBottom)
-    .lineTo(PAGE_WIDTH - PAGE_MARGIN, rowBottom)
-    .strokeColor(RULE)
-    .lineWidth(0.5)
-    .stroke();
-  return rowBottom;
-}
-
-function drawTotals(doc: Doc, data: InvoiceData, top: number): number {
-  const subtotal = data.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
-  const rows: [string, string][] = [['Subtotal', money(subtotal)]];
-
-  if (data.promoDiscount && data.promoDiscount > 0) {
-    rows.push([data.promoCode ? `Discount (${data.promoCode})` : 'Discount', `−${money(data.promoDiscount)}`]);
-  }
-  if (data.extras && data.extras !== 0) {
-    rows.push(['Shipping & handling', money(data.extras)]);
-  }
-
-  const boxX = PAGE_MARGIN + CONTENT_WIDTH / 2;
-  const boxW = CONTENT_WIDTH / 2;
-  let y = top + 12;
-
-  doc.font(FONT).fontSize(9.5);
-  for (const [label, value] of rows) {
-    doc.fillColor(MUTED).text(label, boxX, y, { width: boxW - 100 });
-    doc.fillColor(INK).text(value, boxX + boxW - 100, y, { width: 100, align: 'right' });
-    y += 17;
-  }
-
-  // Grand total sits in a tinted band, the way Zoho emphasises the balance.
-  doc.rect(boxX, y + 2, boxW, 30).fill(TOTAL_BG);
-  doc.fontSize(11).fillColor(INK);
-  bold(doc, 'Total', boxX + 12, y + 12);
-  doc.fontSize(13).fillColor(ACCENT);
-  bold(doc, money(data.total), boxX + boxW - 112, y + 10, { width: 100, align: 'right' });
-  y += 40;
-
-  if (data.paymentReference) {
-    doc.fontSize(8).fillColor(MUTED).text(`Payment reference: ${data.paymentReference}`, boxX, y, {
-      width: boxW,
-      align: 'right',
-    });
-    y = doc.y;
-  }
-  return y + 8;
 }
 
 function drawFooter(doc: Doc, top: number): void {
@@ -278,8 +161,10 @@ export function buildInvoicePdf(data: InvoiceData): Promise<Buffer> {
       cursor = drawBillTo(doc, data, cursor);
       cursor = drawTableHeader(doc, cursor);
       for (const line of data.lines) {
-        // Start a new page before a row would overflow the footer area.
-        if (cursor > doc.page.height - 170) {
+        // Start a new page before a row would overflow the footer area. The tax
+        // layout needs more room below the table (three extra totals rows), so
+        // the threshold grows with it.
+        if (cursor > doc.page.height - (isTaxInvoice() ? 230 : 170)) {
           doc.addPage();
           cursor = drawTableHeader(doc, PAGE_MARGIN);
         }
