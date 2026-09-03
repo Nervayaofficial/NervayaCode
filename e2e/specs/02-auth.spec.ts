@@ -100,6 +100,49 @@ test.describe('Auth – validation & login', () => {
   });
 });
 
+test.describe('Auth – doors are separated by audience', () => {
+  test('TC-023 Customer login offers no Google button', async ({ page }, testInfo) => {
+    await page.goto('/login');
+    const googleOnLogin = await page.getByText(/continue with google/i).count();
+    await page.goto('/signup');
+    const googleOnSignup = await page.getByText(/continue with google/i).count();
+    recordActual(
+      testInfo,
+      `Google button count: /login=${googleOnLogin}, /signup=${googleOnSignup} (expected 0 for both — ` +
+        `Google sign-in is therapist-only, and it was the only path that created a phone-less account).`,
+    );
+    expect(googleOnLogin + googleOnSignup, 'no Google sign-in on the customer forms').toBe(0);
+  });
+
+  test('TC-024 Therapist login is reachable logged out and is Google-only', async ({ page }, testInfo) => {
+    await page.goto('/therapist-login');
+    // Regression guard: '/therapist-login' shares a prefix with THERAPIST_ROUTES
+    // ('/therapist'), so a plain startsWith match treats it as a protected route
+    // and bounces a logged-out visitor to /login.
+    const landedOn = new URL(page.url()).pathname;
+    // A link, not a button: it is a top-level OAuth navigation and keeps link semantics.
+    const googleButton = await page.getByRole('link', { name: /continue with google/i }).count();
+    const phoneField = await page.locator('#login-phone, #signup-phone').count();
+    recordActual(
+      testInfo,
+      `Logged out at /therapist-login: landed on ${landedOn} (expected /therapist-login), ` +
+        `Google button=${googleButton} (expected 1), phone fields=${phoneField} (expected 0 — OTP cannot ` +
+        `set emailVerified, so it could never grant the therapist role).`,
+    );
+    expect(landedOn, 'therapist login is publicly reachable').toBe('/therapist-login');
+    expect(googleButton, 'Google is the only sign-in method offered').toBe(1);
+    expect(phoneField, 'no OTP form on the therapist door').toBe(0);
+  });
+
+  test('TC-025 Unknown OAuth error renders therapist-appropriate copy', async ({ page }, testInfo) => {
+    await page.goto('/therapist-login?error=not_a_therapist');
+    const alert = page.locator('[role="alert"]').first();
+    const text = (await alert.textContent().catch(() => '')) ?? '';
+    recordActual(testInfo, `/therapist-login?error=not_a_therapist showed: "${text.trim().slice(0, 120)}"`);
+    expect(text.toLowerCase(), 'explains the address is not a registered therapist').toContain('therapist');
+  });
+});
+
 test.describe('Auth – session (logged-in customer)', () => {
   test.use({ storageState: AUTH_STATE.customer });
 

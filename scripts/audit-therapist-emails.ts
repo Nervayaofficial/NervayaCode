@@ -38,7 +38,7 @@ function line(t: TherapistRow, note: string): string {
 async function audit(): Promise<void> {
   const conn = await connectDB();
   console.log(`Connected to ${conn.connection.name}`);
-  console.log(`Workspace domain: @${WORKSPACE_DOMAIN}\n`);
+  console.log(`Workspace domain: @${WORKSPACE_DOMAIN} (informational — therapists sign in with personal Gmail)\n`);
 
   const therapists = (await Therapist.collection
     .find({}, { projection: { _id: 1, name: 1, slug: 1, email: 1 } })
@@ -98,11 +98,14 @@ async function audit(): Promise<void> {
     console.log('');
   }
 
+  // Not a warning any more: personal Gmail is the norm, because therapists are
+  // not on a Workspace domain. Their sessions live on the shared calendar
+  // (SHARED_CALENDAR_MAILBOX) instead of a mailbox of their own, which
+  // `resolveCalendarOwner` already handles. Kept as a count so the split is
+  // visible when diagnosing a calendar-ownership question.
   if (offDomain.length) {
-    console.log(`WARNING — ${offDomain.length} therapist(s) outside @${WORKSPACE_DOMAIN}:`);
-    offDomain.forEach((t) => console.log(line(t, t.email ?? '')));
-    console.log('  These will not be able to host Google Meet sessions (the service');
-    console.log('  account can only impersonate mailboxes inside the domain).\n');
+    console.log(`INFO — ${offDomain.length} of ${therapists.length} therapist(s) are outside @${WORKSPACE_DOMAIN}.`);
+    console.log('  Expected. Their session events live on the shared Nervaya calendar.\n');
   }
 
   // Role resolution promotes any User whose email matches a Therapist. Surface

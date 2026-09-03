@@ -7,7 +7,6 @@ import { GENDER, Gender } from '@/lib/constants/enums';
 import { uploadApi } from '@/lib/api/upload';
 import { toast } from 'sonner';
 import { parseCommaSeparated, parseTestimonials } from '@/lib/utils/therapist.utils';
-import { WORKSPACE_DOMAIN, isWorkspaceEmail } from '@/lib/constants/workspace.constants';
 import { validateEmail } from '@/lib/utils/validation.util';
 import type { Therapist } from '@/types/therapist.types';
 import { INITIAL_THERAPIST_FORM_DATA, type TherapistFormChangeEvent, type TherapistFormData } from './formData';
@@ -60,8 +59,14 @@ export function useAddTherapistForm(initialData?: Therapist | TherapistFormData 
   /**
    * Name and email live on step 1, but used to be validated only at final
    * submit — three steps later, with no indication of where to go back to.
-   * Email especially: it is the therapist's sign-in identity and the mailbox
-   * their session calendar lives in, so catching it late is expensive.
+   * Email especially: it is the therapist's sign-in identity, so catching it
+   * late is expensive.
+   *
+   * Format is all we can check. Therapists sign in with their PERSONAL Google
+   * account, so there is no domain to validate against — this field is the whole
+   * authorization list for `/therapist-login`, and a typo that happens to be a
+   * real Gmail would hand that stranger therapist access. Hence the warning in
+   * BasicInformationSection and `scripts/audit-therapist-emails.ts`.
    */
   const validateStep = (step: number): string | null => {
     if (step !== 1) return null;
@@ -71,9 +76,6 @@ export function useAddTherapistForm(initialData?: Therapist | TherapistFormData 
     const email = formData.email?.trim().toLowerCase() ?? '';
     if (!email) return 'Email is required';
     if (!validateEmail(email)) return 'Please enter a valid email address';
-    if (!isWorkspaceEmail(email)) {
-      return `Therapist email must be a @${WORKSPACE_DOMAIN} account — it is used for sign-in and their session calendar`;
-    }
     return null;
   };
 

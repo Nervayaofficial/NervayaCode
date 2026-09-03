@@ -35,15 +35,20 @@ export function getCalendarAuthMode(): CalendarAuthMode {
 export const CALENDAR_ACCOUNT_EMAIL = (process.env.GOOGLE_CALENDAR_ACCOUNT || 'Nervaya calendar').trim().toLowerCase();
 
 /**
- * The Google Workspace domain therapists belong to.
+ * The Google Workspace domain, used for CALENDAR OWNERSHIP ONLY.
  *
- * A therapist's email is load-bearing in three places at once: it is their
- * Google sign-in identity, it is the value that promotes their User to the
- * THERAPIST role, and — when it is a workspace address — the mailbox the
- * Calendar service account impersonates. A typo breaks all three.
+ * It does NOT gate therapist emails. Therapists sign in with personal Gmail
+ * accounts, so nothing validates their address against this domain — the
+ * `Therapist` directory is the authorization list (see google-identity.service).
+ * What remains keyed on it: which mailbox owns a session event
+ * (`resolveCalendarOwner`) and which addresses `delegated` mode may impersonate.
  *
- * Public on purpose (NEXT_PUBLIC_): the admin form validates the domain
- * client-side before submit. It is a domain name, not a secret.
+ * A therapist's email is still load-bearing twice over — their Google sign-in
+ * identity, and the value that promotes their User to THERAPIST — so a typo
+ * still locks them out. It just isn't a calendar mailbox any more.
+ *
+ * Public (NEXT_PUBLIC_) for historical reasons; it is a domain name, not a
+ * secret. Nothing client-side reads it now.
  */
 export const WORKSPACE_DOMAIN = (process.env.NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN || 'nervaya.com').trim().toLowerCase();
 
@@ -67,6 +72,18 @@ export const CONSULTATION_MAILBOX = (process.env.GOOGLE_CONSULTATION_MAILBOX || 
   .toLowerCase();
 
 /**
+ * Consumer mail providers, which can never be a Workspace domain.
+ *
+ * Guards a real misconfiguration: therapists are now openly on personal Gmail,
+ * so setting `NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN=gmail.com` looks superficially
+ * reasonable. It would make every therapist "in domain", so `resolveCalendarOwner`
+ * would return `mode: 'own'` with filtering off, and `delegated` mode would then
+ * try to impersonate a consumer Gmail — which fails, gets classified as a config
+ * error, and degrades every booking to a link-less `pending` session silently.
+ */
+const CONSUMER_MAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'yahoo.com']);
+
+/**
  * True when `email` is a mailbox inside the Workspace domain.
  *
  * Only addresses that pass this may be used as a Calendar impersonation
@@ -75,6 +92,7 @@ export const CONSULTATION_MAILBOX = (process.env.GOOGLE_CONSULTATION_MAILBOX || 
  */
 export function isWorkspaceEmail(email: string | null | undefined): boolean {
   if (typeof email !== 'string') return false;
+  if (CONSUMER_MAIL_DOMAINS.has(WORKSPACE_DOMAIN)) return false;
   const normalized = email.trim().toLowerCase();
   // Reject embedded '@' (a@b@nervaya.com) so the suffix check can't be spoofed.
   const parts = normalized.split('@');

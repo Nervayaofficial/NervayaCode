@@ -10,7 +10,7 @@ type UserDoc = InstanceType<typeof User>;
  * Reconciles a user's role against the therapist directory, keyed on email.
  *
  * This is how the system learns that a given sign-in belongs to a therapist:
- * an admin records the therapist's @nervaya.com address, and whoever
+ * an admin records the therapist's Google (personal Gmail) address, and whoever
  * authenticates with that address — by Google OR by WhatsApp OTP — becomes the
  * THERAPIST linked to that profile.
  *

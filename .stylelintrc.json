@@ -33,7 +33,7 @@
     },
     {
       "files": [
-        "src/components/LoginSignupForm/styles.module.css",
+        "src/components/AuthShell/styles.module.css",
         "src/components/LandingPageCards/styles.module.css",
         "src/components/SleepAssessment/AssessmentContainer/RecommendationView/TherapistSelectionModal/styles.module.css",
         "src/components/Support/ChatWithUs/styles.module.css",

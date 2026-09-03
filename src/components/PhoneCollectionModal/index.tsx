@@ -29,6 +29,16 @@ export interface PhoneCollectionModalProps {
  * Collects and verifies a WhatsApp number for an account that signed up without
  * one (a Google sign-up reaching booking or checkout).
  *
+ * DORMANT as of the therapist-only Google change, not defensive. Google sign-in
+ * no longer creates customer accounts, so no new phone-less customer exists —
+ * and the pre-existing ones cannot authenticate at all any more, so they can
+ * never reach this modal either (see scripts/audit-google-only-users.ts). The
+ * `requirePhone` 428 gate behind it has no reachable actor for the same reason.
+ *
+ * Kept, not deleted: this is the recovery path if those orphaned accounts are
+ * ever given a way back in. Do not treat its presence as evidence that a
+ * phone-less customer is a supported state.
+ *
  * Convenience only — the real enforcement is the 428 gate on the server. A
  * client that never opens this modal simply cannot complete the action.
  *

@@ -1,5 +1,4 @@
 import { GENDER_OPTIONS } from '@/lib/constants/enums';
-import { WORKSPACE_DOMAIN } from '@/lib/constants/workspace.constants';
 import { FormSection } from '../FormSection';
 import { Dropdown, type DropdownOption } from '@/components/common';
 import fieldStyles from '../../fieldStyles.module.css';
@@ -37,11 +36,11 @@ export function BasicInformationSection({ formData, onChange }: TherapistFormFie
               onChange={onChange}
               required
               className={fieldStyles.input}
-              placeholder={`john.smith@${WORKSPACE_DOMAIN}`}
+              placeholder="therapist.name@gmail.com"
             />
             <p className={fieldStyles.hint}>
-              Their @{WORKSPACE_DOMAIN} Google account. Used for sign-in and for their session calendar — a typo here
-              means they log in as a customer and their Meet links fail.
+              The Google account they sign in with — their personal Gmail is fine. Anyone who can log into this address
+              gets therapist access, and a typo leaves them unable to sign in at all, so double-check it.
             </p>
           </div>
         </div>

@@ -9,7 +9,6 @@ import { normalizePhone, validateName } from '@/lib/utils/validation.util';
 import { savePendingSignup, clearPendingSignup } from '@/lib/services/auth';
 import User from '@/lib/models/user.model';
 import connectDB from '@/lib/db/mongodb';
-import { ROLES, Role } from '@/lib/constants/roles';
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { phone, name, role } = body;
+    const { phone, name } = body;
 
     if (!phone || !name) {
       return NextResponse.json(errorResponse('Phone and name are required', null, 400), { status: 400 });
@@ -53,10 +52,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const sanitizedRole: Role | undefined = role === 'ADMIN' ? ROLES.CUSTOMER : (role as Role | undefined);
-
+    // No role is read from the body. Sanitizing one was a blacklist — it mapped
+    // 'ADMIN' to CUSTOMER and passed 'THERAPIST' straight through to
+    // `createUserAfterOtpVerification`, which accepted it. Because an OTP signup
+    // has no email, `applyTherapistRoleFromEmail` returns early instead of
+    // demoting, so anyone could mint a THERAPIST session for the cost of one OTP
+    // to their own phone. Signup creates customers; that is the whole contract.
     await clearPendingSignup(normalizedPhone);
-    await savePendingSignup(normalizedPhone, sanitizedName, sanitizedRole);
+    await savePendingSignup(normalizedPhone, sanitizedName);
 
     const { sendOtp } = await import('@/lib/services/otp/otp-send.service');
     const otpResult = await sendOtp(normalizedPhone, 'signup', ip);

@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       }
 
       const { createUserAfterOtpVerification } = await import('@/lib/services/auth.service');
-      const session = await createUserAfterOtpVerification(pendingData.phone, pendingData.name, pendingData.role);
+      const session = await createUserAfterOtpVerification(pendingData.phone, pendingData.name);
 
       // Push the new user to Zoho CRM as a Lead (fire-and-forget — never blocks signup)
       const { pushSignupLeadToZoho } = await import('@/lib/zoho/zoho-crm.service');

@@ -1,7 +1,8 @@
 /*
- * Secondary treatment on purpose. The purple gradient (--auth-btn-bg) belongs to
- * the primary submit inside the form; giving Google the same weight would leave
- * two competing primary actions on one screen.
+ * Google is the ONLY action on the therapist card, so it carries primary weight
+ * here — unlike on the customer form it once shared with a WhatsApp submit,
+ * where a second gradient button would have created two competing primaries.
+ * The palette variables are inherited from AuthShell's .page.
  */
 .button {
   width: 100%;
@@ -34,14 +35,6 @@
 .button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--auth-accent-ring);
-}
-
-.button[aria-disabled='true'] {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-  pointer-events: none;
 }
 
 .icon {

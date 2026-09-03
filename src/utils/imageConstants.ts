@@ -13,6 +13,12 @@ export const IMAGES = {
   AUTH_HERO_MORNING_MOBILE: '/assets/auth/morning-mobile.png',
   AUTH_HERO_NIGHT_MOBILE: '/assets/auth/night-mobile.png',
 
+  // The therapist door has its own artwork and does NOT swap by time of day:
+  // staff should recognise their sign-in page as a fixed, distinct place.
+  // Composed with the subject on the left and open space on the right, which is
+  // where AuthShell floats the card.
+  AUTH_HERO_THERAPIST: '/THERAPIST-LOGIN.png',
+
   ABOUT_US_MAIN: 'https://res.cloudinary.com/disrq2eh8/image/upload/f_auto,q_auto/about_us_main_ykusxn.png',
 
   API_ERROR: 'https://res.cloudinary.com/disrq2eh8/image/upload/f_auto,q_auto/api_errpr_fst50b.png',

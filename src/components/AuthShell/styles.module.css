@@ -1,0 +1,215 @@
+/* ============================================================
+   Auth — split-screen card (illustrated hero + segmented form)
+   Day/night themable via --auth-* variables. The night theme is keyed off
+   [data-auth-theme='night'] on <html>, set before paint by an inline script
+   in the root layout so the background never flashes the wrong theme.
+   ============================================================ */
+
+.page {
+  /* ── Card palette (LIGHT in both themes, like the reference) ──
+     Only the background image adapts to day/night; the floating form card
+     stays light so it always reads cleanly over the artwork. */
+  --auth-card-bg: #fff;
+  --auth-card-border: rgba(17, 12, 46, 0.07);
+  --auth-text: #1e1b4b;
+  --auth-text-muted: #6b7280;
+  --auth-accent: var(--color-accent);
+  --auth-accent-ring: rgba(83, 34, 213, 0.13);
+  --auth-input-bg: #f6f5fb;
+  --auth-input-bg-focus: #fff;
+  --auth-input-border: #e6e3f2;
+  --auth-icon: #9a93b8;
+  --auth-btn-bg: linear-gradient(135deg, #6d28d9 0%, #5322d5 100%);
+  --auth-btn-bg-hover: linear-gradient(135deg, #5b21b6 0%, #4521a8 100%);
+  --auth-btn-text: #fff;
+
+  /* ── Background (Light "morning" theme default) ──────────── */
+  --auth-page-bg: linear-gradient(180deg, var(--color-accent-surface) 0%, var(--color-cream-bg) 100%);
+
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+
+  /* Full-bleed: the split-screen card fills the whole viewport (no navbar, no
+     card chrome). Stretch the card edge-to-edge and stay scrollable when the
+     stacked mobile layout is taller than the viewport. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-family: var(--font-sans);
+  background: var(--auth-page-bg);
+}
+
+/* ── Dark "night" theme — only the background gradient flips ── */
+:global([data-auth-theme='night']) .page {
+  --auth-page-bg: linear-gradient(180deg, #15122e 0%, #0e0b22 100%);
+}
+
+.backgroundLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--auth-page-bg);
+}
+
+.backgroundImage {
+  object-fit: cover;
+  object-position: center;
+  animation: imgFade 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The single-image variant: shown at EVERY width, unlike the desktop/mobile
+   pair below. Used when the hero has no portrait cut. On phones the card covers
+   most of the viewport, so a portrait crop of a landscape hero slices the
+   subject in half behind it — this anchors to the calm side of the frame
+   instead, giving the card a quiet backdrop rather than half a person. */
+.backgroundImageSingle {
+  object-fit: cover;
+  object-position: center;
+  animation: imgFade 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1024px) {
+  .backgroundImageSingle {
+    object-position: 72% center;
+  }
+}
+
+/* Portrait art for phones — hidden on desktop, swapped in below. */
+.backgroundImageMobile {
+  display: none;
+  object-fit: cover;
+  object-position: center;
+  animation: imgFade 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1024px) {
+  /* Full-bleed portrait background with the card centered over it. */
+  .backgroundImage {
+    display: none;
+  }
+
+  .backgroundImageMobile {
+    display: block;
+  }
+}
+
+@keyframes imgFade {
+  from {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.contentLayer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 0 auto;
+  width: 100%;
+  min-height: 100%;
+}
+
+@media (max-width: 1024px) {
+  .contentLayer {
+    flex-direction: column;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backgroundImage,
+  .backgroundImageMobile,
+  .backgroundImageSingle {
+    animation: none;
+  }
+}
+
+/* ── Form panel — floats to the right of the artwork on desktop ── */
+.formPanelWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3rem clamp(2rem, 6vw, 6rem);
+}
+
+.formPanel {
+  width: 100%;
+  max-width: 540px;
+  background: var(--auth-card-bg);
+  border-radius: var(--radius-2xl);
+  box-shadow:
+    0 24px 60px rgba(20, 11, 48, 0.18),
+    0 6px 16px rgba(20, 11, 48, 0.07);
+  border: 1px solid var(--auth-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 3rem 3.25rem;
+}
+
+@media (max-width: 1024px) {
+  .formPanelWrap {
+    padding: 1.5rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .formPanel {
+    padding: 2rem 1.5rem;
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .formPanelWrap {
+    padding: 1rem;
+  }
+
+  .formPanel {
+    padding: 1.75rem 1.25rem;
+    gap: 1rem;
+  }
+}
+
+/* ── Brand wordmark inside the card (centered, ™ raised) ──── */
+.formLogo {
+  align-self: center;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.04em;
+  margin-bottom: 0.25rem;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--color-text-primary);
+}
+
+.brandWord {
+  display: inline-block;
+}
+
+.brandAccent {
+  color: var(--auth-accent);
+}
+
+/* Small trademark mark sitting as a superscript at the top-right of the
+   wordmark, tinted with the brand purple so it reads cleanly. */
+.brandTm {
+  font-size: 0.5em;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 0.12em;
+  color: var(--auth-accent);
+}

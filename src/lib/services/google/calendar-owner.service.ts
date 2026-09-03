@@ -26,7 +26,7 @@ import {
 export type CalendarOwnerMode = 'own' | 'shared';
 
 export interface CalendarOwner {
-  /** The mailbox to impersonate. Always inside the workspace domain. */
+  /** The mailbox to impersonate. Inside the workspace domain in `delegated` mode; in `oauth` mode this is the display-only CALENDAR_ACCOUNT_EMAIL. */
   mailbox: string;
   mode: CalendarOwnerMode;
   /**

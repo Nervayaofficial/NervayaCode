@@ -6,9 +6,11 @@ import {
   PUBLIC_ROUTES,
   THERAPIST_ROUTES,
   ADMIN_ROUTES,
+  AUTH_ROUTES,
   CUSTOMER_ONLY_ROUTES,
   ROUTES,
   isProtectedPath,
+  matchesRoutePrefix,
 } from '@/utils/routesConstants';
 
 export async function middleware(request: NextRequest) {
@@ -24,14 +26,25 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isPublicRoute = PUBLIC_ROUTES.some((route) => (route === '/' ? pathname === '/' : pathname.startsWith(route)));
+  const isPublicRoute = matchesRoutePrefix(pathname, PUBLIC_ROUTES);
 
   const token = request.cookies.get(COOKIE_NAMES.AUTH_TOKEN)?.value;
   const decoded = token ? await verifyToken(token) : null;
 
   let response: NextResponse;
 
-  if (decoded && (pathname === ROUTES.LOGIN || pathname === ROUTES.SIGNUP)) {
+  // Every sign-in page, not just /login and /signup — /therapist-login has to
+  // bounce an authenticated visitor too, or a signed-in therapist following a
+  // bookmark lands on a login screen they cannot use.
+  //
+  // An `?error=` is the exception: every OAuth failure redirects to a sign-in
+  // page carrying one, and the browser may still hold a valid session (a
+  // signed-in customer who hits /api/auth/google/start, or a therapist whose
+  // directory row was renamed mid-session). Bouncing those to a dashboard
+  // discards the only explanation they would ever see.
+  const carriesAuthError = request.nextUrl.searchParams.has('error');
+
+  if (decoded && !carriesAuthError && matchesRoutePrefix(pathname, AUTH_ROUTES)) {
     let redirectUrl: string = ROUTES.DASHBOARD;
     if (decoded.role === ROLES.THERAPIST) {
       redirectUrl = ROUTES.THERAPIST_DASHBOARD;
@@ -49,24 +62,24 @@ export async function middleware(request: NextRequest) {
     const role = decoded.role;
 
     if (role === ROLES.THERAPIST) {
-      const isTherapistRoute = THERAPIST_ROUTES.some((route) => pathname.startsWith(route));
-      const isCustomerOnly = CUSTOMER_ONLY_ROUTES.some((route) => pathname.startsWith(route));
+      const isTherapistRoute = matchesRoutePrefix(pathname, THERAPIST_ROUTES);
+      const isCustomerOnly = matchesRoutePrefix(pathname, CUSTOMER_ONLY_ROUTES);
       if (isCustomerOnly || (!isTherapistRoute && !isPublicRoute)) {
         response = NextResponse.redirect(new URL(ROUTES.THERAPIST_DASHBOARD, request.url));
       } else {
         response = NextResponse.next();
       }
     } else if (role === ROLES.CUSTOMER) {
-      const isTherapistPath = THERAPIST_ROUTES.some((route) => pathname.startsWith(route));
-      const isAdminPath = ADMIN_ROUTES.some((route) => pathname.startsWith(route));
+      const isTherapistPath = matchesRoutePrefix(pathname, THERAPIST_ROUTES);
+      const isAdminPath = matchesRoutePrefix(pathname, ADMIN_ROUTES);
       if (isTherapistPath || isAdminPath) {
         response = NextResponse.redirect(new URL(ROUTES.DASHBOARD, request.url));
       } else {
         response = NextResponse.next();
       }
     } else if (role === ROLES.ADMIN) {
-      const isCustomerOnly = CUSTOMER_ONLY_ROUTES.some((route) => pathname.startsWith(route));
-      const isTherapistPath = THERAPIST_ROUTES.some((route) => pathname.startsWith(route));
+      const isCustomerOnly = matchesRoutePrefix(pathname, CUSTOMER_ONLY_ROUTES);
+      const isTherapistPath = matchesRoutePrefix(pathname, THERAPIST_ROUTES);
       if (isCustomerOnly || isTherapistPath) {
         response = NextResponse.redirect(new URL(ROUTES.ADMIN_DASHBOARD, request.url));
       } else {
