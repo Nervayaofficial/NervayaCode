@@ -8,8 +8,7 @@ import { validateReturnUrl } from '@/utils/returnUrl';
 /**
  * Honours `returnUrl` like /login does. It previously ignored it, so anyone
  * sent to signup from a gated page landed on the generic dashboard instead of
- * the thing they were trying to do — now more visible, since the Google button
- * carries the returnUrl through the OAuth round trip.
+ * the thing they were trying to do.
  */
 function SignupContent() {
   const searchParams = useSearchParams();

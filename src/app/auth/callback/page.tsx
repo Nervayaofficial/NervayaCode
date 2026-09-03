@@ -8,7 +8,8 @@ import { GlobalLoader } from '@/components/common';
 import { ROUTES } from '@/utils/routesConstants';
 
 /**
- * Landing page for the Google OAuth redirect.
+ * Landing page for the Google OAuth redirect — therapists only, since Google
+ * sign-in is a therapist door (see google-identity.service.ts).
  *
  * This page exists for one reason: `auth_token` is SameSite=Strict, so the
  * browser will not send it on the cross-site navigation chain coming back from
@@ -39,7 +40,7 @@ function CallbackHandler() {
     void completeLoginFromSession(returnUrl, isFirstTime).then((ok) => {
       // The cookie was set moments ago, so failure means it did not survive the
       // hop — send them back to a real error rather than a blank spinner.
-      if (!ok) router.replace(`${ROUTES.LOGIN}?error=google_session`);
+      if (!ok) router.replace(`${ROUTES.THERAPIST_LOGIN}?error=google_session`);
     });
   }, [completeLoginFromSession, router, searchParams]);
 

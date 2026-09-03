@@ -12,12 +12,13 @@ import {
   THERAPIST_ROUTES,
   ROUTES,
   isProtectedPath,
+  matchesRoutePrefix,
 } from '@/utils/routesConstants';
 import { validateReturnUrl } from '@/utils/returnUrl';
 import LoadingScreen from '@/components/AuthGuard/LoadingScreen';
 
 function isAuthRoute(pathname: string): boolean {
-  return AUTH_ROUTES.some((route) => pathname.startsWith(route));
+  return matchesRoutePrefix(pathname, AUTH_ROUTES);
 }
 
 function getDefaultRouteForRole(role: string | undefined): string {
@@ -45,30 +46,22 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (ADMIN_ROUTES.some((route) => pathname.startsWith(route)) && isAuthenticated && user?.role !== ROLES.ADMIN) {
+    if (matchesRoutePrefix(pathname, ADMIN_ROUTES) && isAuthenticated && user?.role !== ROLES.ADMIN) {
       router.replace(getDefaultRouteForRole(user?.role));
       return;
     }
 
-    if (
-      THERAPIST_ROUTES.some((route) => pathname.startsWith(route)) &&
-      isAuthenticated &&
-      user?.role !== ROLES.THERAPIST
-    ) {
+    if (matchesRoutePrefix(pathname, THERAPIST_ROUTES) && isAuthenticated && user?.role !== ROLES.THERAPIST) {
       router.replace(getDefaultRouteForRole(user?.role));
       return;
     }
 
-    if (PROTECTED_ROUTES.some((route) => pathname.startsWith(route)) && isAuthenticated && user?.role === ROLES.ADMIN) {
+    if (matchesRoutePrefix(pathname, PROTECTED_ROUTES) && isAuthenticated && user?.role === ROLES.ADMIN) {
       router.replace(ROUTES.ADMIN_DASHBOARD);
       return;
     }
 
-    if (
-      CUSTOMER_ONLY_ROUTES.some((route) => pathname.startsWith(route)) &&
-      isAuthenticated &&
-      user?.role === ROLES.ADMIN
-    ) {
+    if (matchesRoutePrefix(pathname, CUSTOMER_ONLY_ROUTES) && isAuthenticated && user?.role === ROLES.ADMIN) {
       router.replace(ROUTES.ADMIN_DASHBOARD);
     }
   }, [initializing, isAuthenticated, user?.role, pathname, router]);
@@ -92,15 +85,14 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return <LoadingScreen />;
   }
   if (isAuthenticated) {
-    if (ADMIN_ROUTES.some((route) => pathname.startsWith(route)) && user?.role !== ROLES.ADMIN) {
+    if (matchesRoutePrefix(pathname, ADMIN_ROUTES) && user?.role !== ROLES.ADMIN) {
       return <LoadingScreen />;
     }
-    if (THERAPIST_ROUTES.some((route) => pathname.startsWith(route)) && user?.role !== ROLES.THERAPIST) {
+    if (matchesRoutePrefix(pathname, THERAPIST_ROUTES) && user?.role !== ROLES.THERAPIST) {
       return <LoadingScreen />;
     }
     if (
-      (PROTECTED_ROUTES.some((route) => pathname.startsWith(route)) ||
-        CUSTOMER_ONLY_ROUTES.some((route) => pathname.startsWith(route))) &&
+      (matchesRoutePrefix(pathname, PROTECTED_ROUTES) || matchesRoutePrefix(pathname, CUSTOMER_ONLY_ROUTES)) &&
       user?.role === ROLES.ADMIN
     ) {
       return <LoadingScreen />;

@@ -1,0 +1,71 @@
+/* ============================================================
+   Therapist sign-in card contents.
+   The card, artwork and --auth-* palette come from AuthShell; everything
+   here styles what sits inside it.
+   ============================================================ */
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Names the audience before the heading does, so a customer who lands here by
+   accident recognises the wrong door immediately. */
+.eyebrow {
+  margin: 0;
+  color: var(--auth-accent);
+  font-size: 0.75rem;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: clamp(1.75rem, 1.5rem + 1.2vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--auth-text);
+}
+
+.subheading {
+  margin: 0;
+  color: var(--auth-text-muted);
+  font-size: clamp(0.9rem, 0.87rem + 0.15vw, 0.975rem);
+  line-height: 1.55;
+}
+
+.errorBanner {
+  width: 100%;
+  color: var(--color-error);
+  font-size: var(--text-caption);
+}
+
+.footerNote {
+  margin: 0;
+  color: var(--auth-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.customerLink {
+  margin: 0;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--auth-input-border);
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--auth-text-muted);
+}
+
+.customerLinkAnchor {
+  color: var(--auth-accent);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.customerLinkAnchor:hover {
+  text-decoration: underline;
+}

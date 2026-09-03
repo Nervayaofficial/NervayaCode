@@ -60,7 +60,16 @@ export async function createSessionForUser(user: InstanceType<typeof User>) {
   };
 }
 
-export async function createUserAfterOtpVerification(phone: string, name: string, role: Role = ROLES.CUSTOMER) {
+/**
+ * The ONLY path that creates a customer account, and it can create nothing else.
+ *
+ * Google sign-in used to be a second one, and it minted users with
+ * `phone: null` — which is what made the WhatsApp number optional in practice.
+ * It is now therapist-only and gated on the therapist directory, so a verified
+ * phone is unconditional for customers: this function refuses to run without
+ * one, and `phoneVerified` is set from the OTP that just succeeded.
+ */
+export async function createUserAfterOtpVerification(phone: string, name: string) {
   await connectDB();
 
   if (!validatePhone(phone)) {
@@ -76,14 +85,13 @@ export async function createUserAfterOtpVerification(phone: string, name: string
     throw new ValidationError('User with this phone already exists');
   }
 
-  if (!Object.values(ROLES).includes(role)) {
-    throw new ValidationError('Invalid role');
-  }
-
+  // The role is not a parameter. It used to be, defaulting to CUSTOMER but
+  // accepting anything the caller passed — and the signup route forwarded a
+  // request-body value, so 'THERAPIST' was obtainable for the price of one OTP.
   const user = await User.create({
     phone,
     name,
-    role,
+    role: ROLES.CUSTOMER,
     phoneVerified: true,
     authProviders: [AUTH_PROVIDERS.WHATSAPP],
   });
@@ -148,8 +156,18 @@ export async function updateProfile(userId: string, name: string, email?: string
     // at a therapist's address and keep the flag — walking straight through the
     // privilege boundary in applyTherapistRoleFromEmail. The phone branch used
     // to do exactly this before it was removed; the same rule has to hold here.
-    const current = await User.findById(userId).select('email').lean();
+    const current = await User.findById(userId).select('email role').lean();
     if ((current?.email ?? null) !== nextEmail) {
+      // A therapist's address is admin-owned. It is both their Google sign-in
+      // identity and the directory key that grants the role, and clearing
+      // `emailVerified` below used to break them permanently: their next Google
+      // sign-in passed the directory gate (which matches `Therapist.email`) and
+      // then failed role resolution (which reads `user.email`), demoting them to
+      // CUSTOMER with no route back through the product.
+      if (current?.role === ROLES.THERAPIST) {
+        throw new ValidationError('Your email is managed by Nervaya. Ask an admin to update it.');
+      }
+
       update.emailVerified = false;
     }
 

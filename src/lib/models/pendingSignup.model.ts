@@ -3,7 +3,6 @@ import mongoose, { Schema, Model, Document } from 'mongoose';
 export interface IPendingSignup extends Document {
   phone: string;
   name: string;
-  role?: string;
   expiresAt: Date;
 }
 
@@ -19,9 +18,11 @@ const pendingSignupSchema = new Schema<IPendingSignup>({
     required: true,
     trim: true,
   },
-  role: {
-    type: String,
-  },
+  // No `role`. It was writable from the signup request body and rode through to
+  // user creation, so a caller could ask for THERAPIST and get it. Signup only
+  // ever creates customers; the field is gone so it cannot be reintroduced by
+  // accident. Any in-flight document still carrying one is ignored (strict mode)
+  // and expires within the 10-minute TTL.
   expiresAt: {
     type: Date,
     required: true,
