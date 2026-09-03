@@ -76,6 +76,25 @@ Razorpay with two independent flows:
 
 Client-side checkout hook: `src/hooks/useRazorpayCheckout.ts`.
 
+### GST / Tax Invoices
+
+Every price shown and charged is **GST-inclusive** — tax is backed OUT of the gross, never added on top, so changing a rate changes how a price splits and not what the customer pays. Rates live in `src/lib/constants/tax.constants.ts`: supplements 5%, Deep Rest 18%, therapy Nil (exempt). Shipping follows the supplement rate, because `getShippingCost` only ever applies to carts containing physical goods, making delivery ancillary to a single 5% supply.
+
+The arithmetic is in `src/lib/utils/gst.util.ts` and runs in **integer paise**. Rupee floats lose the half-paisa cases (`19.025` is stored as `19.024999…`, so round-half-up rounds down and the invoice disagrees with Zoho/Tally by a paisa). Two invariants hold by construction, and a break in either means a gross amount never reached the calculation rather than rounding drift:
+
+- `taxableValue + cgst + sgst === gross` per row — tax is derived as `gross - taxable`, not `taxable * rate`.
+- A whole-order promo is apportioned across lines (`apportionDiscount`, remainder to the largest line) **before** the split, so the tax column reflects what was actually collected. The invoice prints an "Amount after discount" row because the per-line TOTAL column shows each line net of its share and would otherwise fail to sum to Subtotal.
+
+`COMPANY.gstin` in `company.constants.ts` is the switch: present, and `invoice-table.ts` renders the eight-column tax layout and titles the document "TAX INVOICE"; cleared to null, both revert to the plain four-column invoice, so tax columns can never appear without the registration number that legitimises them.
+
+The PDF is split three ways — `invoice-theme.ts` (geometry, palette, `money`, faux-bold), `invoice-table.ts` (column specs, rows, totals), `invoice-pdf.ts` (types, header, bill-to, footer, orchestration).
+
+**Place of supply and IGST.** `resolvePlaceOfSupply` (`src/lib/constants/india-states.constants.ts`) derives the recipient's state per order from the **PIN code**, not the typed state — `zipCode` is validated as six digits at checkout while `state` is a free-text input holding "KA" and "Bangalore" in real data. Karnataka (`29`) means CGST+SGST; anything else means a single IGST line at the full rate, and the PDF swaps to a seven-column layout for it. Total tax is identical either way; only its attribution changes, which is what the return depends on.
+
+Several PIN prefixes map to more than one state — `20`–`28` is UP _and_ Uttarakhand, `80`–`85` is Bihar _and_ Jharkhand, `682` is Kochi _and_ Lakshadweep, `16` is Chandigarh _and_ Mohali. This does not affect the tax split, because no ambiguous set contains Karnataka, so intra vs inter-state is still exact; the typed state only breaks the tie for the printed NAME. Orders with no address at all (Deep Rest, therapy) fall back to the seller's state, which is what the law prescribes when there is no address on record. A PIN/state conflict logs a warning and trusts the PIN.
+
+⚠️ **No HSN/SAC codes.** Rule 46 lists them as mandatory, so the invoice is formally deficient until they are added — there is no column for them yet, by choice.
+
 ### "Deep Rest" / "Drift Off" Naming
 
 The sleep therapy program was renamed from "Drift Off" to "Deep Rest". Code still uses `DriftOff` in models, services, and types. Permanent redirects from `/drift-off*` → `/deep-rest*` in `next.config.ts`.
