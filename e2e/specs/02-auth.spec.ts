@@ -93,8 +93,12 @@ test.describe('Auth – validation & login', () => {
       results.push(`${path} -> ${url.pathname}${url.search}`);
     }
     recordActual(testInfo, `Guest navigation: ${results.join(' | ')}`);
-    // At least the protected /cart must bounce to /login carrying returnUrl.
-    await page.goto('/cart');
+
+    // Asserts /checkout, NOT /cart. `/cart` is in CUSTOMER_ONLY_ROUTES, which
+    // `isProtectedPath` deliberately ignores so a guest can build a cart before
+    // signing in — only checkout requires an account. This test used to demand
+    // that /cart redirect and failed against the design it was testing.
+    await page.goto('/checkout');
     await expect.poll(() => new URL(page.url()).pathname).toBe('/login');
     expect(new URL(page.url()).search).toContain('returnUrl');
   });
