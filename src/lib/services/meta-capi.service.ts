@@ -55,10 +55,15 @@ export function buildPurchaseEvent(
 }
 
 /**
- * Fire-and-forget server Purchase. Mirrors pushLeadSafely: failures are logged,
- * never swallowed, and never block or fail a payment.
+ * Server Purchase side effect. Callers must register this through
+ * `runAfterResponse`, not fire it with a bare `void`/floating promise — an
+ * unawaited promise is truncated when the serverless instance freezes on
+ * response (see after-response.util.ts), which would drop the CAPI call
+ * silently. Never throws: every failure path is caught and logged, so a
+ * misconfigured or unreachable Meta endpoint never fails an already-settled
+ * payment.
  */
-export function sendMetaPurchaseEvent(orderId: string, paymentId: string): void {
+export async function sendMetaPurchaseEvent(orderId: string, paymentId: string): Promise<void> {
   const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
   const token = process.env.META_CAPI_ACCESS_TOKEN;
   if (!pixelId || !token) return;
@@ -67,36 +72,36 @@ export function sendMetaPurchaseEvent(orderId: string, paymentId: string): void 
   // optimiser that a staff phone number is a buyer.
   if (paymentId.startsWith('test_bypass_')) return;
 
-  void (async () => {
-    try {
-      const order = await Order.findById(orderId).lean();
-      if (!order) return;
+  try {
+    const order = await Order.findById(orderId).select('items metaAttribution userId').lean();
+    if (!order) return;
 
-      const user = await User.findById(order.userId).select('phone email').lean();
-      const event = buildPurchaseEvent(order, user);
-      if (!event) return;
+    const user = await User.findById(order.userId).select('phone email').lean();
+    const event = buildPurchaseEvent(order, user);
+    if (!event) return;
 
-      const body: Record<string, unknown> = {
-        data: [{ ...event, event_time: Math.floor(Date.now() / 1000) }],
-      };
-      if (process.env.META_CAPI_TEST_EVENT_CODE) {
-        body.test_event_code = process.env.META_CAPI_TEST_EVENT_CODE;
-      }
-
-      const response = await fetch(
-        `https://graph.facebook.com/${GRAPH_VERSION}/${pixelId}/events?access_token=${token}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-      );
-
-      if (!response.ok) {
-        console.error('Meta CAPI purchase failed:', response.status, await response.text());
-      }
-    } catch (error) {
-      console.error('Meta CAPI purchase threw:', error);
+    // access_token travels in the body, not the query string, so it never lands
+    // in proxy access logs, fetch instrumentation, or an error message that
+    // happens to include the request URL.
+    const body: Record<string, unknown> = {
+      data: [{ ...event, event_time: Math.floor(Date.now() / 1000) }],
+      access_token: token,
+    };
+    if (process.env.META_CAPI_TEST_EVENT_CODE) {
+      body.test_event_code = process.env.META_CAPI_TEST_EVENT_CODE;
     }
-  })();
+
+    const response = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pixelId}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      console.error('Meta CAPI purchase failed:', response.status, await response.text());
+    }
+  } catch (error) {
+    console.error('Meta CAPI purchase threw:', error);
+  }
 }

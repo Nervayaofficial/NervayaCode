@@ -268,9 +268,14 @@ async function processPaymentSuccess(orderId: string, paymentId: string) {
     // who bought.
     pushPurchaseToCrm(orderId);
 
-    // Post-commit and fire-and-forget, inside the claimedByThisCall guard so the
-    // verify and webhook paths cannot both report the same sale to Meta.
-    sendMetaPurchaseEvent(orderId, paymentId);
+    // Post-commit, registered via runAfterResponse (not a bare `void`/floating
+    // promise) so the serverless instance stays alive long enough to send it —
+    // otherwise the freeze-on-response would truncate it, same failure mode
+    // documented above for the invoice send. Inside the claimedByThisCall guard
+    // so the verify and webhook paths cannot both report the same sale to Meta.
+    await runAfterResponse('payment:meta-capi', async () => {
+      await sendMetaPurchaseEvent(orderId, paymentId);
+    });
 
     return { success: true };
   } catch (error) {
