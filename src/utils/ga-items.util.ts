@@ -21,6 +21,7 @@ export function cartItemsToGaItems(cart: Cart, pageType: string): ItemParams[] {
       item_id: String(id),
       item_name: name,
       item_category: isSupplement ? 'Supplements' : 'Digital',
+      item_type: item.itemType,
       price: item.price,
       quantity: item.quantity,
       currency: 'INR',

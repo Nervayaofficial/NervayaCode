@@ -1,4 +1,5 @@
 import type { NpsCategory } from '@/utils/nps.util';
+import type { ItemType } from '@/lib/constants/enums';
 declare global {
   interface Window {
     gtag?: (command: string, action: string, params?: Record<string, unknown>) => void;
@@ -122,6 +123,12 @@ export interface ItemParams {
   item_id: string;
   item_name: string;
   item_category?: string;
+  /**
+   * The real line type. `item_category` is a display label and is NOT reliable
+   * for this — order-success labels therapy 'Supplements'. The Meta fence reads
+   * this field and drops any event whose lines omit it.
+   */
+  item_type?: ItemType;
   module?: string;
   price: number;
   currency: string;
