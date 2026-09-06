@@ -1,5 +1,6 @@
 import type { NpsCategory } from '@/utils/nps.util';
 import { ITEM_TYPE, type ItemType } from '@/lib/constants/enums';
+import { mirrorToMetaPixel } from '@/utils/meta-pixel';
 declare global {
   interface Window {
     gtag?: (command: string, action: string, params?: Record<string, unknown>) => void;
@@ -44,6 +45,12 @@ const ECOMMERCE_FIELDS = [
 
 function sendGaEvent(eventName: string, params?: Record<string, unknown>): void {
   if (typeof window === 'undefined') return;
+
+  // Mirror to Meta FIRST. This function returns early on every remaining path
+  // (twice inside the NEXT_PUBLIC_GTM_ID branch, once when gtag is absent), so
+  // a call appended at the end would be unreachable in production, where
+  // NEXT_PUBLIC_GTM_ID is always set. The pixel would silently never fire.
+  mirrorToMetaPixel(eventName, params);
 
   if (process.env.NEXT_PUBLIC_GTM_ID) {
     window.dataLayer = window.dataLayer || [];
