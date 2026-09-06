@@ -1,5 +1,5 @@
 import type { NpsCategory } from '@/utils/nps.util';
-import type { ItemType } from '@/lib/constants/enums';
+import { ITEM_TYPE, type ItemType } from '@/lib/constants/enums';
 declare global {
   interface Window {
     gtag?: (command: string, action: string, params?: Record<string, unknown>) => void;
@@ -415,6 +415,7 @@ export function trackAudioPurchase(params: { order_id: string; value: number; cu
         item_id: params.order_id,
         item_name: 'Deep Rest Session',
         item_category: 'Digital',
+        item_type: ITEM_TYPE.DRIFT_OFF,
         price: params.value,
         quantity: 1,
         currency: params.currency,
