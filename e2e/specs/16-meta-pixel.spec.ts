@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { AUTH_STATE } from '../global-setup';
+import { buildMetaPayload } from '../../src/utils/meta-pixel';
 
 /**
  * META PIXEL (TC-200 .. TC-205)
@@ -21,32 +22,35 @@ import { AUTH_STATE } from '../global-setup';
  * experiment (two otherwise-identical specs, one with `recordFbqCalls`
  * installed and one without, run repeatedly and in both orders) showed the
  * uninstrumented page reliably sees the real `facebook.com/tr` PageView
- * request while the recorder-instrumented page sees zero — the
- * `Object.defineProperty` accessor on `window.fbq`, needed to survive Meta's
- * own `f.fbq = n` assignment, returns a freshly constructed spy function on
- * every read instead of the one stable object `fbevents.js` expects to keep
- * mutating (`n.queue`, `n.callMethod`, `n.loaded`, ...), so the SDK never
- * gets a coherent object to drain its queue through. The recorder is
- * therefore not a neutral observer of PageView specifically — installing it
- * changes the outcome — so TC-201 stays a pure, uninstrumented network smoke
- * test, and the boundary-level PageView assertion lives in TC-204 instead
- * (which is already recorder-instrumented for its own purpose), so no
- * coverage is lost.
+ * request while the recorder-instrumented page sees zero.
+ *
+ * CORRECTED mechanism (round 3 review caught the actual cause): the Meta
+ * snippet opens with `if(f.fbq)return;` — it only installs itself when
+ * `window.fbq` is not already set. `recordFbqCalls` defines `fbq` as an
+ * accessor property whose getter always returns a (truthy) spy function, so
+ * `f.fbq` reads as truthy from the very first line of the snippet and it
+ * bails before ever loading `fbevents.js` or calling the setter. `real` is
+ * therefore never assigned, which also means the `Object.assign(spy, real)`
+ * forwarding below is permanently dead code on every page that has the
+ * recorder installed — there is no live SDK underneath to forward to. The
+ * recorder is a fine observer of what OUR code asked `fbq` to do, but it is
+ * not neutral with respect to whether the real pixel loads at all, which is
+ * exactly why TC-201 (the one test whose whole point is confirming the real
+ * pixel reaches the wire) must stay uninstrumented, and the boundary-level
+ * PageView assertion lives in TC-204 instead (already recorder-instrumented
+ * for its own purpose), so no coverage is lost.
  */
 
 /**
  * Install a recorder for every call made to `window.fbq`, before the Meta
  * pixel snippet runs (hence `addInitScript`, not a post-load patch).
  *
- * The Meta snippet installs its own `fbq` via a plain assignment
- * (`f.fbq = n`), so wrapping `window.fbq` once at call time would just be
- * overwritten the moment the real snippet loads. Instead this defines an
- * accessor property on `window.fbq`: every read returns a spy that logs the
- * call to `__fbqCalls` and then forwards to whatever was last written via the
- * setter (the real queueing `fbq` once the snippet assigns it), so the real
- * pixel keeps working underneath the recorder.
- *
- * Do NOT install this in TC-201 — see the file-level comment above for why.
+ * See the file-level comment above: this makes `window.fbq` read as truthy
+ * before the Meta snippet's own `if(f.fbq)return;` guard runs, so the real
+ * snippet never installs itself on a page where this is applied. That is
+ * fine for every test that only needs to know what OUR code called `fbq`
+ * with — but it means the real pixel never loads here, so do NOT install
+ * this in TC-201, which specifically needs the real pixel to load and send.
  */
 async function recordFbqCalls(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -78,12 +82,49 @@ async function trackedEvents(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * Raw first argument ('init', 'track', ...) of every call recorded so far,
+ * regardless of kind. Used to prove the recorder actually saw the pixel
+ * initialise (`fbq('init', ...)` fires unconditionally, even on fenced
+ * routes — only `track` calls are what the fence suppresses) before trusting
+ * an empty `track` count as evidence the fence worked, rather than evidence
+ * the recorder silently did nothing.
+ */
+async function recordedCallKinds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const calls = (window as unknown as { __fbqCalls?: unknown[][] }).__fbqCalls ?? [];
+    return calls.map((c) => String(c[0]));
+  });
+}
+
 /** Full argument list of the first recorded `fbq('track', name, ...)` call. */
 async function trackedCallArgs(page: Page, name: string): Promise<unknown[] | undefined> {
   return page.evaluate((n) => {
     const calls = (window as unknown as { __fbqCalls?: unknown[][] }).__fbqCalls ?? [];
     return calls.find((c) => c[0] === 'track' && c[1] === n);
   }, name);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+/**
+ * Assert the recorder actually observed this page's pixel initialise, before
+ * trusting an empty `track` count as proof of anything. See FINDING 1 (round
+ * 3): without this, a silently-failed `addInitScript`, or an empty
+ * NEXT_PUBLIC_META_PIXEL_ID (e.g. a fresh clone or a CI env missing the var),
+ * would make `trackedEvents` return `[]` for reasons that have nothing to do
+ * with the fence, and the two safety-critical fence tests would go green
+ * having proven nothing.
+ */
+async function expectRecorderIsLive(page: Page, route: string): Promise<void> {
+  const kinds = await recordedCallKinds(page);
+  expect(kinds, `recorder never observed an fbq('init', ...) call on ${route}`).toContain('init');
 }
 
 test.describe('Meta Pixel', () => {
@@ -123,9 +164,11 @@ test.describe('Meta Pixel', () => {
   }
 
   test('TC-201 fires PageView on an allowed route', async ({ page }) => {
-    // No recordFbqCalls here on purpose: installing it changed whether this
-    // specific request reached the wire (see file-level comment). This is a
-    // deliberately uninstrumented, real end-to-end network check.
+    // No recordFbqCalls here on purpose: installing it prevents the real
+    // pixel from loading at all (see file-level comment). This is a
+    // deliberately uninstrumented, real end-to-end network check, and it
+    // has a live dependency on reaching facebook.com/tr — it will fail in a
+    // CI runner whose egress blocks third-party ad/tracker domains.
     const calls = collectPixelCalls(page);
     await page.goto('/', { waitUntil: 'load' });
     await expect.poll(() => calls.some((u) => u.searchParams.get('ev') === 'PageView')).toBe(true);
@@ -142,7 +185,12 @@ test.describe('Meta Pixel', () => {
       await page.waitForTimeout(3000);
       // addInitScript re-runs on every navigation in this page, so
       // __fbqCalls resets per route — each iteration checks that route alone.
-      expect(await trackedEvents(page), `expected zero fbq calls on ${route}`).toHaveLength(0);
+      await expectRecorderIsLive(page, route);
+      const kinds = await recordedCallKinds(page);
+      expect(
+        kinds.filter((k) => k === 'track'),
+        `expected zero fbq track calls on ${route}`,
+      ).toHaveLength(0);
     }
 
     // /dashboard is in PROTECTED_ROUTES, so a guest visiting it is redirected
@@ -151,12 +199,21 @@ test.describe('Meta Pixel', () => {
     // rather than on /dashboard's fence. Use an authenticated context so the
     // page under test is the one the fence must actually keep silent.
     const authedContext = await browser.newContext({ storageState: AUTH_STATE.customer });
-    const authedPage = await authedContext.newPage();
-    await recordFbqCalls(authedPage);
-    await authedPage.goto('/dashboard', { waitUntil: 'load' });
-    await authedPage.waitForTimeout(3000);
-    expect(await trackedEvents(authedPage), 'expected zero fbq calls on /dashboard').toHaveLength(0);
-    await authedContext.close();
+    try {
+      const authedPage = await authedContext.newPage();
+      await recordFbqCalls(authedPage);
+      await authedPage.goto('/dashboard', { waitUntil: 'load' });
+      await authedPage.waitForTimeout(3000);
+      await expectRecorderIsLive(authedPage, '/dashboard');
+      const kinds = await recordedCallKinds(authedPage);
+      expect(
+        kinds.filter((k) => k === 'track'),
+        'expected zero fbq track calls on /dashboard',
+      ).toHaveLength(0);
+    } finally {
+      // A failed assertion above must not leak this context.
+      await authedContext.close();
+    }
   });
 
   test('TC-203 fires nothing on a sleep-blog article', async ({ page }) => {
@@ -165,7 +222,9 @@ test.describe('Meta Pixel', () => {
     // See TC-202 comment: absence can't be polled for, so a generous fixed
     // settle is used deliberately.
     await page.waitForTimeout(3000);
-    expect(await trackedEvents(page)).toHaveLength(0);
+    await expectRecorderIsLive(page, '/sleep-blog');
+    const kinds = await recordedCallKinds(page);
+    expect(kinds.filter((k) => k === 'track')).toHaveLength(0);
   });
 
   test('TC-204 sends exactly one PageView per navigation', async ({ page }) => {
@@ -175,7 +234,19 @@ test.describe('Meta Pixel', () => {
     // same recorder TC-202/203/205 rely on.
     await recordFbqCalls(page);
     await page.goto('/', { waitUntil: 'load' });
-    await expect.poll(async () => (await trackedEvents(page)).filter((e) => e === 'PageView').length).toBe(1);
+
+    // Poll only for "at least one". expect.poll resolves and returns the
+    // instant its predicate first matches — polling directly for "count is
+    // exactly 1" would exit and pass the moment the first PageView lands,
+    // before a regression (e.g. someone re-adding the Meta snippet's own
+    // removed `fbq('track','PageView')` call) has had a chance to fire its
+    // second, duplicate PageView a little later. So: wait for the first hit,
+    // settle a fixed amount to give a would-be duplicate time to arrive, then
+    // count for real.
+    await expect
+      .poll(async () => (await trackedEvents(page)).filter((e) => e === 'PageView').length)
+      .toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(2000);
     const events = await trackedEvents(page);
     expect(events.filter((e) => e === 'PageView')).toHaveLength(1);
   });
@@ -207,23 +278,81 @@ test.describe('Meta Pixel (authenticated)', () => {
 
     const call = await trackedCallArgs(page, 'AddToCart');
     expect(call, 'no AddToCart fbq call recorded').toBeDefined();
-    const payload = call?.[2] as Record<string, unknown> | undefined;
-    expect(payload?.content_type).toBe('product');
-    const contentIds = payload?.content_ids;
-    expect(Array.isArray(contentIds) && contentIds.length > 0).toBe(true);
+    const rawPayload = call?.[2];
+    if (!isRecord(rawPayload)) throw new Error('AddToCart payload was not an object');
+    expect(rawPayload.content_type).toBe('product');
+    const contentIds = rawPayload.content_ids;
+    if (!Array.isArray(contentIds) || contentIds.length === 0) {
+      throw new Error('AddToCart payload had no content_ids');
+    }
 
     // fbq's own payload doesn't carry item_type — the fence strips everything
     // about non-supplement lines before it ever builds the Meta payload, by
     // design — so line classification is verified against the source
-    // dataLayer event instead, which does carry item_type per line.
+    // dataLayer event instead, which does carry item_type per line. NOTE:
+    // the catalog behind this page is a single supplement product, so this
+    // loop can only ever inspect an id that could not have been anything but
+    // 'Supplement' — it is an integration sanity check on the live pipeline,
+    // not proof that mixed-cart filtering works. That proof lives in the
+    // 'Meta Pixel payload rules' describe below, against a hand-built mixed
+    // cart and the real buildMetaPayload function.
     const itemTypesById = await page.evaluate(() => {
       const dl = (window as unknown as { dataLayer?: Record<string, unknown>[] }).dataLayer ?? [];
       const evt = dl.find((e) => e.event === 'add_to_cart');
       const items = (evt?.items ?? []) as { item_id?: string; item_type?: string }[];
       return Object.fromEntries(items.map((i) => [i.item_id, i.item_type]));
     });
-    for (const id of contentIds as string[]) {
+    for (const id of contentIds) {
+      if (!isString(id)) throw new Error('content_ids entry was not a string');
       expect(itemTypesById[id]).toBe('Supplement');
     }
+  });
+});
+
+/**
+ * These run in plain Node (no `page`, no browser) against the real, pure
+ * `buildMetaPayload` — added because TC-205's "no therapy lines" claim is
+ * vacuous against this app's single-product catalog: there is no way to add
+ * a non-supplement line to the cart through the UI, so that test can never
+ * exercise the filtering logic it claims to guard. Deleting
+ * `filterSupplementLines` entirely would not turn TC-205 red. These tests
+ * hand-build a mixed cart to prove the claim directly.
+ */
+test.describe('Meta Pixel payload rules', () => {
+  test('buildMetaPayload keeps only the supplement line from a mixed cart', () => {
+    const result = buildMetaPayload(
+      'add_to_cart',
+      {
+        currency: 'INR',
+        items: [
+          { item_id: 'supp-1', item_type: 'Supplement', price: 500, quantity: 2 },
+          { item_id: 'therapy-1', item_type: 'Therapy', price: 2000, quantity: 1 },
+        ],
+      },
+      '/cart',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.payload.content_ids).toEqual(['supp-1']);
+    // Only the supplement line's price * quantity (500 * 2) — the therapy
+    // line's 2000 must not be reflected anywhere in the Meta-bound value.
+    expect(result?.payload.value).toBe(1000);
+  });
+
+  test('buildMetaPayload returns null for a therapy-only cart', () => {
+    const result = buildMetaPayload(
+      'add_to_cart',
+      {
+        currency: 'INR',
+        items: [{ item_id: 'therapy-1', item_type: 'Therapy', price: 2000, quantity: 1 }],
+      },
+      '/cart',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  test('buildMetaPayload returns null for page_view on a fenced route', () => {
+    expect(buildMetaPayload('page_view', {}, '/sleep-assessment')).toBeNull();
   });
 });
