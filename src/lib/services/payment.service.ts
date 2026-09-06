@@ -18,6 +18,7 @@ import { toObjectId } from '@/lib/utils/objectId.util';
 import { hasPaymentBypass } from '@/lib/constants/test-logins';
 import { releaseSlot } from '@/lib/services/slot-hold.service';
 import { runAfterResponse } from '@/lib/utils/after-response.util';
+import { sendMetaPurchaseEvent } from '@/lib/services/meta-capi.service';
 
 export interface RazorpayOrderResponse {
   id: string;
@@ -266,6 +267,10 @@ async function processPaymentSuccess(orderId: string, paymentId: string) {
     // fire-and-forget. Until this existed the CRM knew who signed up but never
     // who bought.
     pushPurchaseToCrm(orderId);
+
+    // Post-commit and fire-and-forget, inside the claimedByThisCall guard so the
+    // verify and webhook paths cannot both report the same sale to Meta.
+    sendMetaPurchaseEvent(orderId, paymentId);
 
     return { success: true };
   } catch (error) {

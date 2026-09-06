@@ -3,6 +3,7 @@
  * network. Run: npx tsx scripts/verify-meta-capi.ts
  */
 import { buildMetaUserData, hashMetaValue, normalisePhoneForMeta } from '../src/lib/utils/meta-hash.util';
+import { buildPurchaseEvent } from '../src/lib/services/meta-capi.service';
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown): void {
@@ -20,6 +21,34 @@ check('email is lowercased before hashing', buildMetaUserData({ email: '  Test@E
 ]);
 check('fbp passes through unhashed', buildMetaUserData({ fbp: 'fb.1.123.456' }).fbp, 'fb.1.123.456');
 check('absent identifiers are omitted', Object.keys(buildMetaUserData({})), []);
+
+const mixedOrder = {
+  _id: 'abc123',
+  userId: 'user789',
+  metaAttribution: { fbp: 'fb.1.1.1' },
+  items: [
+    { itemType: 'Supplement', itemId: 's1', name: 'Sleep Aid', price: 500, quantity: 2 },
+    { itemType: 'Therapy', itemId: 't1', name: 'Session', price: 2000, quantity: 1 },
+  ],
+} as unknown as Parameters<typeof buildPurchaseEvent>[0];
+
+const built = buildPurchaseEvent(mixedOrder, { phone: '+919876543210', email: null });
+const custom = built?.custom_data as Record<string, unknown>;
+
+check('therapy lines are excluded', custom.content_ids, ['s1']);
+check('value excludes therapy', custom.value, 1000);
+check('event_id is deterministic', built?.event_id, 'purchase_abc123');
+check('external_id hashes the user id, not the order id', (built?.user_data as Record<string, unknown>).external_id, [
+  hashMetaValue('user789'),
+]);
+
+const therapyOnly = {
+  _id: 'xyz789',
+  userId: 'user789',
+  items: [{ itemType: 'Therapy', itemId: 't1', name: 'Session', price: 2000, quantity: 1 }],
+} as unknown as Parameters<typeof buildPurchaseEvent>[0];
+
+check('therapy-only order sends nothing', buildPurchaseEvent(therapyOnly, null), null);
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
