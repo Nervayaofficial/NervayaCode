@@ -19,6 +19,7 @@ export const META_FENCED_ROUTES = [
   '/consultation',
   '/session',
   '/account',
+  '/dashboard',
   '/therapist',
   '/admin',
   '/sleep-blog',

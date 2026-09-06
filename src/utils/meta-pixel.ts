@@ -51,12 +51,17 @@ function filterSupplementLines(raw: unknown): Record<string, unknown>[] | null {
   return lines;
 }
 
-function toContents(lines: Record<string, unknown>[]): MetaContent[] {
-  return lines.map((line) => ({
-    id: String(line.item_id ?? ''),
-    quantity: typeof line.quantity === 'number' ? line.quantity : 1,
-    item_price: typeof line.price === 'number' ? line.price : 0,
-  }));
+function toContents(lines: Record<string, unknown>[]): MetaContent[] | null {
+  const contents: MetaContent[] = [];
+  for (const line of lines) {
+    const { item_id: id, quantity, price } = line;
+    if (typeof id !== 'string' || id === '') return null;
+    const qty = quantity === undefined ? 1 : quantity;
+    if (typeof qty !== 'number' || !Number.isFinite(qty) || qty <= 0) return null;
+    if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) return null;
+    contents.push({ id, quantity: qty, item_price: price });
+  }
+  return contents;
 }
 
 /**
@@ -78,12 +83,10 @@ export function buildMetaPayload(
   }
 
   const metaName = META_EVENT_MAP[eventName];
-  if (!metaName) return null;
+  if (typeof metaName !== 'string') return null;
 
   if (eventName === 'page_view') return { name: 'PageView', payload: {} };
-  if (eventName === 'search') {
-    return { name: 'Search', payload: { search_string: String(params?.search_term ?? '') } };
-  }
+  if (eventName === 'search') return { name: 'Search', payload: {} };
 
   if (!META_ITEM_EVENTS.has(eventName)) return { name: metaName, payload: {} };
 
@@ -91,6 +94,7 @@ export function buildMetaPayload(
   if (lines === null || lines.length === 0) return null;
 
   const contents = toContents(lines);
+  if (contents === null) return null;
   // Never pass through `value` — order.totalAmount and the cart total both
   // include therapy and Deep Rest lines the fence just removed.
   const value = contents.reduce((sum, c) => sum + c.item_price * c.quantity, 0);
