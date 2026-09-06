@@ -15,9 +15,23 @@ import { AUTH_STATE } from '../global-setup';
  * Zero network requests therefore cannot distinguish "our fence correctly
  * withheld this" from "Meta discarded a call we made" — so the fence tests
  * (TC-202/203) and the boundary checks (TC-204/205) assert on whether OUR code
- * called `fbq`, recorded via `recordFbqCalls` below. TC-201 is the exception:
- * PageView is never restricted, so it still also asserts on real network
- * traffic as an end-to-end smoke test that the wire actually carries something.
+ * called `fbq`, recorded via `recordFbqCalls` below.
+ *
+ * TC-201 is deliberately the ONE test that installs no recorder. An A/B
+ * experiment (two otherwise-identical specs, one with `recordFbqCalls`
+ * installed and one without, run repeatedly and in both orders) showed the
+ * uninstrumented page reliably sees the real `facebook.com/tr` PageView
+ * request while the recorder-instrumented page sees zero — the
+ * `Object.defineProperty` accessor on `window.fbq`, needed to survive Meta's
+ * own `f.fbq = n` assignment, returns a freshly constructed spy function on
+ * every read instead of the one stable object `fbevents.js` expects to keep
+ * mutating (`n.queue`, `n.callMethod`, `n.loaded`, ...), so the SDK never
+ * gets a coherent object to drain its queue through. The recorder is
+ * therefore not a neutral observer of PageView specifically — installing it
+ * changes the outcome — so TC-201 stays a pure, uninstrumented network smoke
+ * test, and the boundary-level PageView assertion lives in TC-204 instead
+ * (which is already recorder-instrumented for its own purpose), so no
+ * coverage is lost.
  */
 
 /**
@@ -31,6 +45,8 @@ import { AUTH_STATE } from '../global-setup';
  * call to `__fbqCalls` and then forwards to whatever was last written via the
  * setter (the real queueing `fbq` once the snippet assigns it), so the real
  * pixel keeps working underneath the recorder.
+ *
+ * Do NOT install this in TC-201 — see the file-level comment above for why.
  */
 async function recordFbqCalls(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -107,15 +123,12 @@ test.describe('Meta Pixel', () => {
   }
 
   test('TC-201 fires PageView on an allowed route', async ({ page }) => {
-    await recordFbqCalls(page);
+    // No recordFbqCalls here on purpose: installing it changed whether this
+    // specific request reached the wire (see file-level comment). This is a
+    // deliberately uninstrumented, real end-to-end network check.
     const calls = collectPixelCalls(page);
     await page.goto('/', { waitUntil: 'load' });
-
-    // PageView is never restricted by Meta's SDK, so this route still also
-    // proves the request reaches the real wire (end-to-end smoke test).
     await expect.poll(() => calls.some((u) => u.searchParams.get('ev') === 'PageView')).toBe(true);
-    // The boundary assertion: did OUR code ask fbq to send PageView.
-    await expect.poll(() => trackedEvents(page)).toContain('PageView');
   });
 
   test('TC-202 fires nothing on fenced health routes', async ({ page, browser }) => {
@@ -123,7 +136,7 @@ test.describe('Meta Pixel', () => {
     for (const route of ['/sleep-assessment', '/deep-rest', '/therapy-corner']) {
       await page.goto(route, { waitUntil: 'load' });
       // Asserting an absence cannot be polled for, so a fixed settle is the
-      // correct tool here (unlike TC-201/204/205, which poll for a positive).
+      // correct tool here (unlike TC-204/205, which poll for a positive).
       // Generous window: waitForTimeout(2000) proved to be a race elsewhere in
       // this suite (a redirect + product fetch landing after 800ms).
       await page.waitForTimeout(3000);
@@ -156,6 +169,10 @@ test.describe('Meta Pixel', () => {
   });
 
   test('TC-204 sends exactly one PageView per navigation', async ({ page }) => {
+    // This is also the boundary-level PageView coverage that TC-201
+    // deliberately does not provide (see file-level comment) — it confirms
+    // OUR code called fbq('track', 'PageView', ...) exactly once, using the
+    // same recorder TC-202/203/205 rely on.
     await recordFbqCalls(page);
     await page.goto('/', { waitUntil: 'load' });
     await expect.poll(async () => (await trackedEvents(page)).filter((e) => e === 'PageView').length).toBe(1);
