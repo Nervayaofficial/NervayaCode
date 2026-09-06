@@ -63,12 +63,6 @@ export async function createRazorpayOrder(
     throw new ValidationError('Order already paid');
   }
 
-  // Store before payment: the webhook path that may finalise this order has no
-  // cookies of its own to read these from.
-  if (metaAttribution && (metaAttribution.fbp || metaAttribution.fbc)) {
-    await Order.findByIdAndUpdate(orderId, { metaAttribution });
-  }
-
   // Final sanity check for therapy slots before taking payment (or bypassing it).
   await assertTherapySlotsAvailable(order.items);
 
@@ -78,7 +72,10 @@ export async function createRazorpayOrder(
   const buyer = await User.findById(toObjectId(userId)).select('phone').lean();
   if (buyer?.phone && hasPaymentBypass(buyer.phone)) {
     const paymentId = `test_bypass_${orderId.slice(-8)}`;
-    await Order.findByIdAndUpdate(orderId, { razorpayOrderId: paymentId });
+    await Order.findByIdAndUpdate(orderId, {
+      razorpayOrderId: paymentId,
+      ...(metaAttribution ? { metaAttribution } : {}),
+    });
     await processPaymentSuccess(orderId, paymentId);
     return { bypassed: true as const, orderId, id: paymentId };
   }
@@ -99,6 +96,7 @@ export async function createRazorpayOrder(
 
   await Order.findByIdAndUpdate(orderId, {
     razorpayOrderId: razorpayOrder.id,
+    ...(metaAttribution ? { metaAttribution } : {}),
   });
 
   return razorpayOrder;

@@ -5,6 +5,26 @@ import { handleError } from '@/lib/utils/error.util';
 import { requireAuth } from '@/lib/middleware/auth.middleware';
 import { ROLES } from '@/lib/constants/roles';
 
+// Meta's own _fbp/_fbc cookies always look like `fb.<subdomainIndex>.<timestamp>.<value>`.
+// These are attacker-controlled (cookies, referer header) so we clamp length and shape
+// before they ever reach the order document / Task 8's Conversions API forwarding.
+const MAX_FB_VALUE_LENGTH = 255;
+const MAX_EVENT_SOURCE_URL_LENGTH = 500;
+
+function clampFbValue(value: string | undefined): string | undefined {
+  if (!value || !value.startsWith('fb.')) {
+    return undefined;
+  }
+  return value.slice(0, MAX_FB_VALUE_LENGTH);
+}
+
+function clampEventSourceUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.slice(0, MAX_EVENT_SOURCE_URL_LENGTH);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authResult = await requireAuth(request, [ROLES.CUSTOMER, ROLES.ADMIN]);
@@ -27,9 +47,9 @@ export async function POST(request: NextRequest) {
     }
 
     const razorpayOrder = await createRazorpayOrder(orderId, amount, authResult.user.userId, {
-      fbp: request.cookies.get('_fbp')?.value,
-      fbc: request.cookies.get('_fbc')?.value,
-      eventSourceUrl: request.headers.get('referer') ?? undefined,
+      fbp: clampFbValue(request.cookies.get('_fbp')?.value),
+      fbc: clampFbValue(request.cookies.get('_fbc')?.value),
+      eventSourceUrl: clampEventSourceUrl(request.headers.get('referer') ?? undefined),
     });
 
     const responseData = {
