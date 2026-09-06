@@ -46,6 +46,16 @@ export interface IOrder extends Document {
   invoiceNumber?: string;
   /** Cloudinary URL of the rendered invoice PDF. */
   invoiceUrl?: string;
+  /**
+   * Meta click identifiers captured in the browser at create-order time.
+   * Persisted because the Razorpay webhook path has no cookies, and that is the
+   * path that fires when the customer closed the tab before returning.
+   */
+  metaAttribution?: {
+    fbp?: string;
+    fbc?: string;
+    eventSourceUrl?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -178,6 +188,17 @@ const orderSchema = new Schema<IOrder>(
     promoDiscount: { type: Number, min: 0 },
     invoiceNumber: { type: String, index: true },
     invoiceUrl: { type: String },
+    metaAttribution: {
+      type: new Schema(
+        {
+          fbp: { type: String },
+          fbc: { type: String },
+          eventSourceUrl: { type: String },
+        },
+        { _id: false },
+      ),
+      required: false,
+    },
   },
   {
     timestamps: true,

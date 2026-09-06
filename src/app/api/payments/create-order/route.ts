@@ -26,7 +26,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const razorpayOrder = await createRazorpayOrder(orderId, amount, authResult.user.userId);
+    const razorpayOrder = await createRazorpayOrder(orderId, amount, authResult.user.userId, {
+      fbp: request.cookies.get('_fbp')?.value,
+      fbc: request.cookies.get('_fbc')?.value,
+      eventSourceUrl: request.headers.get('referer') ?? undefined,
+    });
 
     const responseData = {
       ...razorpayOrder,

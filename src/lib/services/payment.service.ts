@@ -32,7 +32,18 @@ export interface RazorpayOrderResponse {
   created_at: number;
 }
 
-export async function createRazorpayOrder(orderId: string, amount: number, userId: string) {
+export interface MetaAttribution {
+  fbp?: string;
+  fbc?: string;
+  eventSourceUrl?: string;
+}
+
+export async function createRazorpayOrder(
+  orderId: string,
+  amount: number,
+  userId: string,
+  metaAttribution?: MetaAttribution,
+) {
   await connectDB();
 
   if (!Types.ObjectId.isValid(orderId)) {
@@ -50,6 +61,12 @@ export async function createRazorpayOrder(orderId: string, amount: number, userI
 
   if (order.paymentStatus === PAYMENT_STATUS.PAID) {
     throw new ValidationError('Order already paid');
+  }
+
+  // Store before payment: the webhook path that may finalise this order has no
+  // cookies of its own to read these from.
+  if (metaAttribution && (metaAttribution.fbp || metaAttribution.fbc)) {
+    await Order.findByIdAndUpdate(orderId, { metaAttribution });
   }
 
   // Final sanity check for therapy slots before taking payment (or bypassing it).
