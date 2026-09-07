@@ -19,7 +19,7 @@ npx tsx scripts/verify-auth.ts                         # Seed DB with test users
 npx tsx scripts/backfill-therapists-profile-fields.ts  # One-time therapist data migration
 ```
 
-There is no test suite. Husky + lint-staged runs Prettier and ESLint on pre-commit.
+Playwright e2e specs live in `e2e/specs` and run with `npm run test:e2e` against a dev server on `:3100`, using console-OTP login and seeded auth states. There is no unit-test runner: pure server-side logic is verified with one-off `npx tsx scripts/verify-*.ts` scripts, and pure browser-side logic (e.g. `buildMetaPayload`, `isFencedRoute`) is unit-tested inside Playwright spec files, which run in Node and can import source modules directly. Husky + lint-staged runs Prettier and ESLint on pre-commit.
 
 ## Architecture
 
@@ -111,6 +111,36 @@ Lead sources emitted (one producer each — never push the same event from both 
 
 `POST /api/zoho/lead` is intentionally public — the signup form pushes a lead before an account exists — so it is rate-limited per IP (`checkZohoLeadRateLimit`).
 
+### Meta Pixel & Conversions API
+
+Ad tracking for Facebook/Instagram, sent from both the browser (`src/components/MetaPixel/index.tsx`) and the server (`sendMetaPurchaseEvent`, `src/lib/services/meta-capi.service.ts`), so ad blockers and iOS tracking prevention don't blind the optimiser. The pixel component's `fbq('init', ...)` snippet deliberately drops the stock trailing `fbq('track','PageView')` — `usePageView` already fires GA4's `page_view` on mount and every route change, and `mirrorToMetaPixel` (called at the **top** of `sendGaEvent` in `src/utils/analytics.ts`, before the `NEXT_PUBLIC_GTM_ID` branch, because that function returns early on every other path) turns each into a Meta `PageView`; keeping the snippet's own call would double-count the first page of every session.
+
+**Meta never sees health data. Three layers enforce it, and all three are required:**
+
+1. **Path fence** — `isFencedRoute` (`src/utils/meta-pixel.ts`) blocks eleven prefixes in `META_FENCED_ROUTES` (`src/lib/constants/meta-pixel.constants.ts`): `/deep-rest`, `/drift-off`, `/sleep-assessment`, `/therapy-corner`, `/consultation`, `/session`, `/account`, `/dashboard`, `/therapist`, `/admin`, `/sleep-blog`. `/dashboard` is fenced because it surfaces therapy session status, assessment results and Deep Rest progress directly on the page. `/sleep-blog` is fenced deliberately: article slugs (`how-to-beat-insomnia`) are health-revealing on their own, and index-only fencing was rejected because most blog traffic lands straight on an article from search, never touching the index.
+2. **Item fence** — every event carrying an `items` array (`view_item`, `add_to_cart`, `begin_checkout`, `add_payment_info`, `purchase` — `META_ITEM_EVENTS`), not just `Purchase`, is filtered to lines where `ItemParams.item_type === ITEM_TYPE.SUPPLEMENT`. It reads `item_type`, **never** `item_category` — the latter is unreliable: `order-success` labels a therapy line `'Supplements'` while `ga-items.util.ts` labels the same line `'Digital'`. A line missing `item_type` drops the **whole event**, not just that line (`filterSupplementLines` returns `null`) — the fence fails closed.
+3. **URL/referrer fence** — `fbq` attaches the full `document.location.href` and `document.referrer` to every event, not just the pathname, so a fenced route can leak through an _unfenced_ path: `/login?returnUrl=%2Fsleep-assessment` isn't fenced by prefix but carries a fenced route in its query string, and `src/lib/axios.ts`'s 401 redirect puts a fenced URL into the next page's `document.referrer`. `isFencedInUrlOrReferrer` decodes and substring-matches both against `META_FENCED_ROUTES` before anything is sent, and is deliberately over-broad (a stray match inside an unrelated query param can drop a legitimate event) because over-blocking, not under-blocking, is the acceptable failure direction. **This is the layer most likely to get silently reintroduced as a regression** — it isn't visible from the route list, only from reading `mirrorToMetaPixel` itself.
+
+**`AddToCart` is mapped and fires correctly, but Meta currently blocks it for this dataset** — Meta's stated reason is "based on the categorisation of your data source," not a payload problem, and no code change fixes it. It is left firing on purpose so it resumes automatically if the block clears; don't spend a day debugging what looks like a broken integration.
+
+**`Purchase` dedup.** Sent from both the browser (as `eventID`, camelCase, passed to `fbq`) and the server (as `event_id`, `snake_case`, in the CAPI body) on `purchase_<orderId>` — derived deterministically from the order id on both sides, never generated. Any randomness or timestamp component would double-count every conversion.
+
+**Test orders are suppressed on both sides,** so Nervaya's fixed test logins (which settle with `test_bypass_*` payment ids) never pollute revenue reporting: `meta-capi.service.ts` skips them server-side before building an event, and `order-success/[orderId]/page.tsx` skips its `trackPurchase()` call client-side for the same prefix — which also suppresses the GA4 purchase, deliberately, since both flow through the same `sendGaEvent`.
+
+**Post-response side effects must go through `runAfterResponse`,** never a bare floating promise — an unawaited promise is killed when the serverless instance freezes on response. The CAPI call (`payment:meta-capi`) is registered this way alongside the Zoho purchase push (`payment:crm-purchase` in `payment.service.ts`, `drift-off:crm-purchase` in `driftOffPayment.service.ts`). Note that `pushLeadSafely` in `src/lib/zoho/zoho-crm.service.ts` is `void push().catch(log)` and resolves before its HTTP call finishes, so awaiting it accomplishes nothing — both crm-purchase paths await the underlying push directly instead and reimplement its log-don't-throw behavior inline. This exact bug already bit both payment flows once.
+
+All five outcomes are now distinguishable from logs alone, in both flows: succeeded (`zoho lead pushed for order ...`), skipped-by-design (`skipped for order ...: no contactable user` / `test bypass payment id`), failed-at-lookup (`could not load order/user for order ...`), failed-at-push (`zoho push failed for order ...`), and never-ran (`[label] scheduled via after()` with no follow-up line — the platform never invoked the callback). `eslint.config.mjs` permits only `console.warn`/`console.error`, so the success line is a `warn` — a single successful payment emits several warn-level lines, and alerting keyed on warn needs its own filter.
+
+**Env vars:** `NEXT_PUBLIC_META_PIXEL_ID` (browser pixel), `META_CAPI_ACCESS_TOKEN` (server events), `META_CAPI_TEST_EVENT_CODE` (optional, Test Events tab), `META_GRAPH_API_VERSION` (optional, default `v21.0`). All degrade to a no-op when absent.
+
+**Known gaps, documented rather than hidden:**
+
+- Meta under-reports revenue: therapy and Deep Rest sales are never sent (the item fence blocks them client-side, and `driftOffPayment.service.ts` never calls `sendMetaPurchaseEvent`). Never reconcile Meta's ROAS against the books.
+- `value` excludes shipping and the promo discount — a ₹1000 supplement with ₹50 shipping and a ₹100 promo reports ₹1000 against ₹950 actually charged. Dedup is unaffected (both sides compute the same figure); this is a ROAS-accuracy gap only.
+- `InitiateCheckout` fires twice per checkout — `CartSummary` and `useCheckout` both call `trackBeginCheckout` — and neither carries an `eventID`, so Meta cannot dedupe them. Both call sites also feed GA4, so picking a canonical one is a GA4 reporting decision, not a Meta one.
+- The pixel has only ever been exercised against `localhost:3100`. It has **not** been verified against the live `nervaya.com` domain, and server-side CAPI dedup has never been confirmed in Meta Events Manager Diagnostics. Both need doing after deploy.
+- Test coverage: `Purchase` has no browser test at all (the dedup id is unverified by the suite); five of the eight mapped events have no payload assertions; there is no negative-mapping test (adding an event to `META_EVENT_MAP` would not turn anything red); and six of the eleven fenced prefixes are never exercised (`e2e/specs/16-meta-pixel.spec.ts`).
+
 ### OTP & WhatsApp
 
 Both signup and login require a WhatsApp OTP (passwordless). OTP delivery goes through the **Meta WhatsApp Cloud API** (`src/lib/whatsapp/whatsapp-client.ts` + `src/lib/services/otp/whatsapp-otp-delivery.ts`) using an approved authentication message template. The OTP store is MongoDB-backed (`otpToken` collection, TTL-expiring), keyed on `phone:purpose`. When WhatsApp creds are missing it falls back to `ConsoleOtpDelivery`, which logs the code — keeps local/dev flows testable without credentials.
@@ -134,7 +164,7 @@ Signup is two-stage: `pendingSignup` (phone-keyed, TTL 10 min) holds the name un
 
 **Required:** `MONGODB_URI`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`, `RAZORPAY_KEY_ID`/`KEY_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_OTP_TEMPLATE_NAME`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (therapist sign-in — without them `/therapist-login` cannot work and no therapist can reach their dashboard)
 
-**Optional:** `JWT_EXPIRES_IN` (overrides the derived session length; leave unset so the token and cookie stay in sync), `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_API_VERSION` (default `v21.0`), `OTP_EMAIL_USER`/`OTP_EMAIL_APP_PASSWORD`/`OTP_EMAIL_FROM_NAME` (email receipts only), `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_GA_ID`, `NEXT_PUBLIC_GTM_ID`, `ZOHO_CLIENT_ID`/`ZOHO_CLIENT_SECRET`/`ZOHO_REFRESH_TOKEN`/`ZOHO_ACCOUNTS_URL`/`ZOHO_API_URL` (all five required together — Zoho is skipped entirely if any is missing; see the Zoho section below), `NEXT_PUBLIC_APP_URL` (absolute site origin used in meeting links/emails)
+**Optional:** `JWT_EXPIRES_IN` (overrides the derived session length; leave unset so the token and cookie stay in sync), `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_API_VERSION` (default `v21.0`), `OTP_EMAIL_USER`/`OTP_EMAIL_APP_PASSWORD`/`OTP_EMAIL_FROM_NAME` (email receipts only), `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_GA_ID`, `NEXT_PUBLIC_GTM_ID`, `ZOHO_CLIENT_ID`/`ZOHO_CLIENT_SECRET`/`ZOHO_REFRESH_TOKEN`/`ZOHO_ACCOUNTS_URL`/`ZOHO_API_URL` (all five required together — Zoho is skipped entirely if any is missing; see the Zoho section below), `NEXT_PUBLIC_APP_URL` (absolute site origin used in meeting links/emails), `NEXT_PUBLIC_META_PIXEL_ID`/`META_CAPI_ACCESS_TOKEN`/`META_CAPI_TEST_EVENT_CODE`/`META_GRAPH_API_VERSION` (Meta Pixel + Conversions API; see the Meta Pixel section below — all degrade to a no-op when absent)
 
 ### Therapy Session Video (Jitsi / JaaS)
 
