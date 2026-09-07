@@ -37,6 +37,11 @@ const custom = built?.custom_data as Record<string, unknown>;
 
 check('therapy lines are excluded', custom.content_ids, ['s1']);
 check('value excludes therapy', custom.value, 1000);
+// This is the server-side half of the Purchase dedup story: the browser's
+// eventID and this event_id must be the identical `purchase_<order_id>`
+// string, or Meta double-counts every conversion. The browser-side
+// counterpart lives in e2e/specs/16-meta-pixel.spec.ts ('Meta Pixel payload
+// rules' describe block) — change one and check the other.
 check('event_id is deterministic', built?.event_id, 'purchase_abc123');
 check('external_id hashes the user id, not the order id', (built?.user_data as Record<string, unknown>).external_id, [
   hashMetaValue('user789'),

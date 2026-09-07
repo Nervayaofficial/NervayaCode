@@ -355,6 +355,64 @@ test.describe('Meta Pixel payload rules', () => {
   test('buildMetaPayload returns null for page_view on a fenced route', () => {
     expect(buildMetaPayload('page_view', {}, '/sleep-assessment')).toBeNull();
   });
+
+  /**
+   * The entire no-double-counting story for Purchase rests on the browser's
+   * `eventID` and the server's `event_id` (buildPurchaseEvent,
+   * src/lib/services/meta-capi.service.ts) being the identical string. Until
+   * these three tests, that derivation had no assertion anywhere in the
+   * suite — a rename on either side would ship silently and double every
+   * reported conversion. `scripts/verify-meta-capi.ts` is the server-side
+   * counterpart asserting the same `purchase_<id>` string; change one and
+   * check the other.
+   */
+  test('purchase eventId is purchase_<order_id> for a known order id', () => {
+    const result = buildMetaPayload(
+      'purchase',
+      {
+        currency: 'INR',
+        order_id: 'order-abc123',
+        items: [{ item_id: 'supp-1', item_type: 'Supplement', price: 500, quantity: 1 }],
+      },
+      '/order-success',
+    );
+
+    expect(result?.eventId).toBe('purchase_order-abc123');
+  });
+
+  test('purchase with no order_id returns null (fail-closed)', () => {
+    const result = buildMetaPayload(
+      'purchase',
+      {
+        currency: 'INR',
+        items: [{ item_id: 'supp-1', item_type: 'Supplement', price: 500, quantity: 1 }],
+      },
+      '/order-success',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  test('mixed supplement+therapy purchase excludes the therapy line', () => {
+    const result = buildMetaPayload(
+      'purchase',
+      {
+        currency: 'INR',
+        order_id: 'order-xyz789',
+        items: [
+          { item_id: 'supp-1', item_type: 'Supplement', price: 500, quantity: 2 },
+          { item_id: 'therapy-1', item_type: 'Therapy', price: 2000, quantity: 1 },
+        ],
+      },
+      '/order-success',
+    );
+
+    expect(result?.eventId).toBe('purchase_order-xyz789');
+    expect(result?.payload.content_ids).toEqual(['supp-1']);
+    // Only the supplement line's price * quantity (500 * 2) — the therapy
+    // line's 2000 must never appear in the Meta-bound value.
+    expect(result?.payload.value).toBe(1000);
+  });
 });
 
 /**
