@@ -2,6 +2,7 @@ import { ITEM_TYPE } from '@/lib/constants/enums';
 import Order, { type IOrder } from '@/lib/models/order.model';
 import User from '@/lib/models/user.model';
 import { buildMetaUserData } from '@/lib/utils/meta-hash.util';
+import { referencesFencedRoute } from '@/lib/utils/meta-fence.util';
 
 const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
@@ -24,12 +25,21 @@ export function buildPurchaseEvent(
   const orderId = String(order._id);
   const value = supplements.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
+  // Re-check the fence at SEND time, not just at capture
+  // (src/app/api/payments/create-order/route.ts). An order written before
+  // that capture-side fix existed may already hold a fenced URL in the
+  // database, and this is the layer that protects those already-persisted
+  // rows — it must not simply trust that `metaAttribution.eventSourceUrl`
+  // was clean when it was stored.
+  const eventSourceUrl = order.metaAttribution?.eventSourceUrl;
+  const safeEventSourceUrl = eventSourceUrl && !referencesFencedRoute(eventSourceUrl) ? eventSourceUrl : undefined;
+
   return {
     event_name: 'Purchase',
     // Must match the browser's eventID exactly, or Meta counts the sale twice.
     event_id: `purchase_${orderId}`,
     action_source: 'website',
-    ...(order.metaAttribution?.eventSourceUrl ? { event_source_url: order.metaAttribution.eventSourceUrl } : {}),
+    ...(safeEventSourceUrl ? { event_source_url: safeEventSourceUrl } : {}),
     user_data: buildMetaUserData({
       phone: user?.phone,
       email: user?.email,

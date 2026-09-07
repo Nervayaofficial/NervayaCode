@@ -8,6 +8,7 @@ import {
   META_ITEM_EVENTS,
   META_PIXEL_ID,
 } from '@/lib/constants/meta-pixel.constants';
+import { referencesFencedRoute } from '@/lib/utils/meta-fence.util';
 
 declare global {
   interface Window {
@@ -32,15 +33,6 @@ export function isFencedRoute(pathname: string): boolean {
   return matchesRoutePrefix(pathname, META_FENCED_ROUTES);
 }
 
-/** Best-effort URL-decode: malformed percent-encoding must not throw. */
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
 /**
  * True when a fenced route appears anywhere in the given full URL or
  * referrer — not just as the current pathname.
@@ -52,16 +44,15 @@ function safeDecode(value: string): string {
  * `/login?returnUrl=<fenced-path>` on a 401). Both values arrive
  * percent-encoded, so each is decoded before the substring test.
  *
- * Deliberately over-broad: this is a plain substring test against the
- * decoded string, not path-boundary aware, so a stray match inside an
- * unrelated query param (e.g. a `utm_` value containing "session") can drop
- * an otherwise-legitimate event. That false-positive is the acceptable
- * failure direction — a leaked health route is not.
+ * Delegates to `referencesFencedRoute` (`src/lib/utils/meta-fence.util.ts`)
+ * — the environment-agnostic version of this same check, extracted so the
+ * server side (Route Handlers, services) can reuse it without importing this
+ * `'use client'` module. Deliberately over-broad: see that function's
+ * docblock for why a stray substring match is the acceptable failure
+ * direction, not a bug.
  */
 export function isFencedInUrlOrReferrer(href: string, referrer: string): boolean {
-  const decodedHref = safeDecode(href);
-  const decodedReferrer = safeDecode(referrer);
-  return META_FENCED_ROUTES.some((route) => decodedHref.includes(route) || decodedReferrer.includes(route));
+  return referencesFencedRoute(href) || referencesFencedRoute(referrer);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

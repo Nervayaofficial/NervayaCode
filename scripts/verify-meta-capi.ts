@@ -50,5 +50,37 @@ const therapyOnly = {
 
 check('therapy-only order sends nothing', buildPurchaseEvent(therapyOnly, null), null);
 
+// SEND-side half of the CAPI health fence (src/lib/services/meta-capi.service.ts).
+// An order captured before the create-order route validated/fenced the Referer
+// may already hold a fenced URL in `metaAttribution.eventSourceUrl` — this proves
+// buildPurchaseEvent re-checks it rather than trusting what capture-time stored.
+const fencedEventSourceOrder = {
+  _id: 'fenced1',
+  userId: 'user789',
+  metaAttribution: { eventSourceUrl: 'https://nervaya.com/sleep-assessment?step=3' },
+  items: [{ itemType: 'Supplement', itemId: 's1', name: 'Sleep Aid', price: 500, quantity: 1 }],
+} as unknown as Parameters<typeof buildPurchaseEvent>[0];
+
+const fencedBuilt = buildPurchaseEvent(fencedEventSourceOrder, null);
+check(
+  'event_source_url omitted when the stored value references a fenced route',
+  fencedBuilt && 'event_source_url' in fencedBuilt,
+  false,
+);
+
+const cleanEventSourceOrder = {
+  _id: 'clean1',
+  userId: 'user789',
+  metaAttribution: { eventSourceUrl: 'https://nervaya.com/sleep-supplements/abc123' },
+  items: [{ itemType: 'Supplement', itemId: 's1', name: 'Sleep Aid', price: 500, quantity: 1 }],
+} as unknown as Parameters<typeof buildPurchaseEvent>[0];
+
+const cleanBuilt = buildPurchaseEvent(cleanEventSourceOrder, null);
+check(
+  'event_source_url survives when the stored value is not fenced',
+  cleanBuilt?.event_source_url,
+  'https://nervaya.com/sleep-supplements/abc123',
+);
+
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
