@@ -1,4 +1,6 @@
 import type { NpsCategory } from '@/utils/nps.util';
+import { ITEM_TYPE, type ItemType } from '@/lib/constants/enums';
+import { mirrorToMetaPixel } from '@/utils/meta-pixel';
 declare global {
   interface Window {
     gtag?: (command: string, action: string, params?: Record<string, unknown>) => void;
@@ -43,6 +45,12 @@ const ECOMMERCE_FIELDS = [
 
 function sendGaEvent(eventName: string, params?: Record<string, unknown>): void {
   if (typeof window === 'undefined') return;
+
+  // Mirror to Meta FIRST. This function returns early on every remaining path
+  // (twice inside the NEXT_PUBLIC_GTM_ID branch, once when gtag is absent), so
+  // a call appended at the end would be unreachable in production, where
+  // NEXT_PUBLIC_GTM_ID is always set. The pixel would silently never fire.
+  mirrorToMetaPixel(eventName, params);
 
   if (process.env.NEXT_PUBLIC_GTM_ID) {
     window.dataLayer = window.dataLayer || [];
@@ -122,6 +130,12 @@ export interface ItemParams {
   item_id: string;
   item_name: string;
   item_category?: string;
+  /**
+   * The real line type. `item_category` is a display label and is NOT reliable
+   * for this — order-success labels therapy 'Supplements'. The Meta fence reads
+   * this field and drops any event whose lines omit it.
+   */
+  item_type?: ItemType;
   module?: string;
   price: number;
   currency: string;
@@ -408,6 +422,7 @@ export function trackAudioPurchase(params: { order_id: string; value: number; cu
         item_id: params.order_id,
         item_name: 'Deep Rest Session',
         item_category: 'Digital',
+        item_type: ITEM_TYPE.DRIFT_OFF,
         price: params.value,
         quantity: 1,
         currency: params.currency,

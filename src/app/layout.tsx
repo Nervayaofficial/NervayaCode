@@ -8,6 +8,7 @@ import './globals.css';
 import Providers from '@/components/Providers';
 import { EngagementTracker } from '@/components/EngagementTracker';
 import BodyRouteClass from '@/components/BodyRouteClass';
+import { MetaPixel } from '@/components/MetaPixel';
 import { IMAGES } from '@/utils/imageConstants';
 
 const outfit = Outfit({
@@ -113,6 +114,7 @@ export default function RootLayout({
         <Analytics />
         {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
         {gaId && !gtmId ? <GoogleAnalytics gaId={gaId} /> : null}
+        <MetaPixel />
       </body>
     </html>
   );

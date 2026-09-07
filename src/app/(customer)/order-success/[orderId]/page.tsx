@@ -15,7 +15,6 @@ import {
   ICON_HOUSE,
   ICON_HEADPHONES,
 } from '@/constants/icons';
-import { OrderItem } from '@/types/supplement.types';
 import { ITEM_TYPE } from '@/lib/constants/enums';
 import { formatPrice } from '@/utils/cart.util';
 import { useOrderDetail } from '@/queries/orders/useOrderDetail';
@@ -24,27 +23,10 @@ import { getShippingCost } from '@/utils/shipping.util';
 import { trackPurchase } from '@/utils/analytics';
 import Sidebar from '@/components/Sidebar/LazySidebar';
 import { GlobalLoader } from '@/components/common';
+import { getSubtotal, formatOrderDate, formatOrderNumber } from './order-success.helpers';
 import styles from './styles.module.css';
 
 const Lottie = dynamic(() => import('lottie-react'), { ssr: false });
-
-function getSubtotal(items: OrderItem[]): number {
-  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-}
-
-function formatOrderDate(date: Date | string): string {
-  return new Date(date).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
-function formatOrderNumber(orderId: string): string {
-  const year = new Date().getFullYear();
-  const short = orderId.replace(/-/g, '').slice(-8).toUpperCase();
-  return `NS-${year}-${short}`;
-}
 
 export default function OrderSuccessPage() {
   const params = useParams();
@@ -57,6 +39,14 @@ export default function OrderSuccessPage() {
 
   useEffect(() => {
     if (!order) return;
+
+    // Nervaya's fixed test logins settle orders server-side with a
+    // `test_bypass_`-prefixed paymentId (see payment.service.ts /
+    // driftOffPayment.service.ts). meta-capi.service.ts already skips these
+    // server-side; the browser has no equivalent check, so without this a
+    // staff test order would fire a real Purchase (training Meta's optimiser
+    // on a staff phone number) and a real GA4 purchase (polluting revenue).
+    if (order.paymentId?.startsWith('test_bypass_')) return;
 
     // `purchase` must fire once per order. This effect re-runs on refresh and
     // back-navigation, and GA4 does not reliably deduplicate by transaction_id,
@@ -87,6 +77,7 @@ export default function OrderSuccessPage() {
         item_id: typeof item.itemId === 'string' ? item.itemId : String(item.itemId),
         item_name: item.name,
         item_category: item.itemType === ITEM_TYPE.DRIFT_OFF ? 'Digital' : 'Supplements',
+        item_type: item.itemType,
         price: item.price,
         quantity: item.quantity,
         currency: 'INR',
