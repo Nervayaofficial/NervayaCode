@@ -165,9 +165,16 @@ export function mirrorToMetaPixel(eventName: string, params?: Record<string, unk
   const event = buildMetaPayload(eventName, params, window.location.pathname);
   if (!event) return;
 
-  if (event.eventId) {
-    window.fbq('track', event.name, event.payload, { eventID: event.eventId });
-    return;
+  try {
+    if (event.eventId) {
+      window.fbq('track', event.name, event.payload, { eventID: event.eventId });
+      return;
+    }
+    window.fbq('track', event.name, event.payload);
+  } catch (error) {
+    // `fbq` is third-party code (Meta's fbevents.js, or a browser-extension
+    // shim replacing it) — a throw here must never surface as our bug. See
+    // the docblock above: this is what makes "Never throws" true.
+    console.error('mirrorToMetaPixel: window.fbq threw', error);
   }
-  window.fbq('track', event.name, event.payload);
 }
