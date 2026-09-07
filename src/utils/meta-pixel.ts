@@ -32,6 +32,38 @@ export function isFencedRoute(pathname: string): boolean {
   return matchesRoutePrefix(pathname, META_FENCED_ROUTES);
 }
 
+/** Best-effort URL-decode: malformed percent-encoding must not throw. */
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * True when a fenced route appears anywhere in the given full URL or
+ * referrer — not just as the current pathname.
+ *
+ * `fbq` attaches `document.location` (as `dl=`) and `document.referrer` (as
+ * `rl=`) to every event it sends, so a fenced path leaks whenever it shows up
+ * in a query string (e.g. `/login?returnUrl=%2Fsleep-assessment`) or as the
+ * referrer of an allowed page (e.g. axios's full-page redirect to
+ * `/login?returnUrl=<fenced-path>` on a 401). Both values arrive
+ * percent-encoded, so each is decoded before the substring test.
+ *
+ * Deliberately over-broad: this is a plain substring test against the
+ * decoded string, not path-boundary aware, so a stray match inside an
+ * unrelated query param (e.g. a `utm_` value containing "session") can drop
+ * an otherwise-legitimate event. That false-positive is the acceptable
+ * failure direction — a leaked health route is not.
+ */
+export function isFencedInUrlOrReferrer(href: string, referrer: string): boolean {
+  const decodedHref = safeDecode(href);
+  const decodedReferrer = safeDecode(referrer);
+  return META_FENCED_ROUTES.some((route) => decodedHref.includes(route) || decodedReferrer.includes(route));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -127,6 +159,8 @@ export function mirrorToMetaPixel(eventName: string, params?: Record<string, unk
   if (typeof window === 'undefined') return;
   if (!META_PIXEL_ID) return;
   if (typeof window.fbq !== 'function') return;
+
+  if (isFencedInUrlOrReferrer(window.location.href, document.referrer)) return;
 
   const event = buildMetaPayload(eventName, params, window.location.pathname);
   if (!event) return;

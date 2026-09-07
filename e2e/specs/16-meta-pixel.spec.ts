@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { AUTH_STATE } from '../global-setup';
-import { buildMetaPayload } from '../../src/utils/meta-pixel';
+import { buildMetaPayload, isFencedInUrlOrReferrer } from '../../src/utils/meta-pixel';
 
 /**
  * META PIXEL (TC-200 .. TC-205)
@@ -354,5 +354,33 @@ test.describe('Meta Pixel payload rules', () => {
 
   test('buildMetaPayload returns null for page_view on a fenced route', () => {
     expect(buildMetaPayload('page_view', {}, '/sleep-assessment')).toBeNull();
+  });
+});
+
+/**
+ * FIX 1: `fbq` attaches the full `document.location` (dl=) and
+ * `document.referrer` (rl=) to every event, so the pathname-only fence in
+ * `isFencedRoute` misses a fenced route riding along in a query string (the
+ * guest-finishes-assessment -> /login?returnUrl=%2Fsleep-assessment redirect)
+ * or as the referrer of an allowed page (axios's full-page 401 redirect to
+ * /login?returnUrl=<fenced path>). These test the new helper directly, in
+ * plain Node, against the real fence.
+ */
+test.describe('Meta Pixel URL/referrer fence (FIX 1)', () => {
+  test('detects a fenced route percent-encoded in the URL query string', () => {
+    const href = 'https://nervaya.example/login?returnUrl=%2Fsleep-assessment';
+    expect(isFencedInUrlOrReferrer(href, '')).toBe(true);
+  });
+
+  test('detects a fenced route in the referrer', () => {
+    const href = 'https://nervaya.example/login';
+    const referrer = 'https://nervaya.example/login?returnUrl=%2Faccount';
+    expect(isFencedInUrlOrReferrer(href, referrer)).toBe(true);
+  });
+
+  test('allows a clean URL with no fenced route in it or its referrer', () => {
+    const href = 'https://nervaya.example/sleep-supplements/abc123';
+    const referrer = 'https://nervaya.example/';
+    expect(isFencedInUrlOrReferrer(href, referrer)).toBe(false);
   });
 });
