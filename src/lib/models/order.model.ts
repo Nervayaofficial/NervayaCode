@@ -66,7 +66,6 @@ const orderItemSchema = new Schema<IOrderItem>(
       type: String,
       enum: ['Supplement', 'DriftOff', 'Therapy'],
       required: true,
-      default: 'Supplement',
     },
     itemId: {
       type: Schema.Types.Mixed,
