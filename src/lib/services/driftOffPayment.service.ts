@@ -9,6 +9,7 @@ import { getRazorpayInstance } from '@/lib/utils/razorpay.util';
 import { toObjectId } from '@/lib/utils/objectId.util';
 import User from '@/lib/models/user.model';
 import { hasPaymentBypass } from '@/lib/constants/test-logins';
+import { runAfterResponse } from '@/lib/utils/after-response.util';
 
 export async function createDriftOffRazorpayOrder(driftOffOrderId: string) {
   await connectDB();
@@ -109,39 +110,63 @@ async function settleDriftOffOrder(driftOffOrderId: string, paymentId: string, u
     await session.endSession();
   }
 
-  // Post-commit, fire-and-forget. Skipped on the idempotent replay so a retried
+  // Post-commit. Registered via runAfterResponse (not a bare floating promise)
+  // so the serverless instance stays alive long enough to send it — otherwise
+  // the freeze-on-response would truncate it before the Zoho call ever went
+  // out, same failure mode already fixed for the supplement flow in
+  // payment.service.ts. Skipped on the idempotent replay so a retried
   // verification does not push the same purchase twice.
   if (settledAmount !== null) {
-    pushDeepRestPurchaseToCrm(driftOffOrderId, userId, settledAmount);
+    const amount = settledAmount;
+    await runAfterResponse('drift-off:crm-purchase', async () => {
+      await pushDeepRestPurchaseToCrm(driftOffOrderId, userId, amount);
+    });
   }
 }
 
 /**
  * Record a paid Deep Rest order against the buyer's CRM lead. Never throws — the
  * payment has already succeeded and must not be affected by a CRM outage.
+ *
+ * Callers must await this (via runAfterResponse), not fire it with a bare
+ * `void`. It also awaits `pushPurchaseLeadToZoho` directly rather than going
+ * through `pushLeadSafely` — that helper is itself `void push().catch(log)`
+ * and resolves before the underlying HTTP call finishes, which would silently
+ * reintroduce the same truncation bug this function exists to fix. Mirrors
+ * the fix already applied to the supplement flow's `pushPurchaseToCrm` in
+ * payment.service.ts.
  */
-function pushDeepRestPurchaseToCrm(driftOffOrderId: string, userId: string, amount: number): void {
-  void (async () => {
-    try {
-      const [user, { pushPurchaseLeadToZoho, pushLeadSafely }] = await Promise.all([
-        User.findById(userId).select('name email phone').lean(),
-        import('@/lib/zoho/zoho-crm.service'),
-      ]);
-      if (!user?.name || (!user.email && !user.phone)) return;
-
-      pushLeadSafely('deep rest purchase', () =>
-        pushPurchaseLeadToZoho({
-          name: user.name,
-          email: user.email ?? undefined,
-          phone: user.phone ?? undefined,
-          orderId: driftOffOrderId,
-          amount,
-          channel: 'Deep Rest program',
-          items: [{ name: 'Deep Rest Session', quantity: 1, price: amount }],
-        }),
-      );
-    } catch (error) {
-      console.error('[Zoho] deep rest purchase lead lookup failed:', error);
+async function pushDeepRestPurchaseToCrm(driftOffOrderId: string, userId: string, amount: number): Promise<void> {
+  // Tracks which half of the function a thrown error came from, so the single
+  // catch below can still tell "never got the data to build a lead" apart from
+  // "had the data, Zoho rejected/unreachable" — two different systems to debug.
+  let stage: 'lookup' | 'push' = 'lookup';
+  try {
+    const [user, { pushPurchaseLeadToZoho }] = await Promise.all([
+      User.findById(userId).select('name email phone').lean(),
+      import('@/lib/zoho/zoho-crm.service'),
+    ]);
+    if (!user?.name || (!user.email && !user.phone)) {
+      console.warn(`[drift-off:crm-purchase] skipped for order ${driftOffOrderId}: no contactable user`);
+      return;
     }
-  })();
+
+    stage = 'push';
+    await pushPurchaseLeadToZoho({
+      name: user.name,
+      email: user.email ?? undefined,
+      phone: user.phone ?? undefined,
+      orderId: driftOffOrderId,
+      amount,
+      channel: 'Deep Rest program',
+      items: [{ name: 'Deep Rest Session', quantity: 1, price: amount }],
+    });
+    console.warn(`[drift-off:crm-purchase] zoho lead pushed for order ${driftOffOrderId}`);
+  } catch (error) {
+    if (stage === 'push') {
+      console.error(`[drift-off:crm-purchase] zoho push failed for order ${driftOffOrderId}:`, error);
+    } else {
+      console.error(`[drift-off:crm-purchase] could not load user for order ${driftOffOrderId}:`, error);
+    }
+  }
 }
