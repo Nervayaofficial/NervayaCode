@@ -374,6 +374,10 @@ export async function handlePaymentWebhook(razorpayOrderId: string, paymentId: s
  * work is genuinely finished before the serverless instance is allowed to freeze.
  */
 async function pushPurchaseToCrm(orderId: string): Promise<void> {
+  // Tracks which half of the function a thrown error came from, so the single
+  // catch below can still tell "never got the data to build a lead" apart from
+  // "had the data, Zoho rejected/unreachable" — two different systems to debug.
+  let stage: 'lookup' | 'push' = 'lookup';
   try {
     const [order, { pushPurchaseLeadToZoho }] = await Promise.all([
       Order.findById(orderId).lean(),
@@ -385,6 +389,8 @@ async function pushPurchaseToCrm(orderId: string): Promise<void> {
     if (!user?.name || (!user.email && !user.phone)) return;
 
     const channels = [...new Set(order.items.map((item) => item.itemType))].join(' + ');
+
+    stage = 'push';
     // Awaited directly rather than via `pushLeadSafely` — that helper is itself
     // a fire-and-forget `void push().catch()` wrapper, which would silently
     // reintroduce the same floating-promise bug this function exists to fix.
@@ -398,7 +404,12 @@ async function pushPurchaseToCrm(orderId: string): Promise<void> {
       channel: channels ? `${channels} order` : 'Order',
       items: order.items.map((item) => ({ name: item.name, quantity: item.quantity, price: item.price })),
     });
+    console.warn(`[payment:crm-purchase] zoho lead pushed for order ${orderId}`);
   } catch (error) {
-    console.error('[Zoho] purchase lead push failed:', error instanceof Error ? error.message : error);
+    if (stage === 'push') {
+      console.error(`[payment:crm-purchase] zoho push failed for order ${orderId}:`, error);
+    } else {
+      console.error(`[payment:crm-purchase] could not load order/user for order ${orderId}:`, error);
+    }
   }
 }
