@@ -8,6 +8,19 @@ import { META_PIXEL_ID } from '@/lib/constants/meta-pixel.constants';
  * deliberately omitted: `usePageView` already fires `page_view` on mount and on
  * every route change, and the mirror turns each into a Meta PageView. Keeping
  * the snippet's own call would double-count the first page of every session.
+ *
+ * This component is rendered unconditionally in the root layout, so it also
+ * runs on fenced health routes (/sleep-assessment, /deep-rest, /dashboard,
+ * ...). Our own fence (src/utils/meta-pixel.ts) only governs the `fbq('track',
+ * ...)` calls we make ourselves — it cannot stop Meta's own auto-config and
+ * automatic-events plugins, which are enabled by default and fire their own
+ * events (carrying the full page URL) as soon as the pixel initialises.
+ * `fbq('set', 'autoConfig', false, ...)`, called BEFORE `fbq('init', ...)`
+ * (Meta requires this order), disables both, so no plugin can collect page
+ * metadata or button clicks from a fenced page our own code never touches.
+ * Trade-off: this also turns off browser-side automatic advanced matching —
+ * accepted because the server-side Conversions API (meta-capi.service.ts)
+ * already supplies matching via hashed phone/email/external_id.
  */
 export function MetaPixel(): React.ReactElement | null {
   if (!META_PIXEL_ID) return null;
@@ -23,6 +36,7 @@ export function MetaPixel(): React.ReactElement | null {
         t.src=v;s=b.getElementsByTagName(e)[0];
         s.parentNode.insertBefore(t,s)}(window,document,'script',
         'https://connect.facebook.net/en_US/fbevents.js');
+        fbq('set', 'autoConfig', false, '${META_PIXEL_ID}');
         fbq('init', '${META_PIXEL_ID}');
       `}
     </Script>
