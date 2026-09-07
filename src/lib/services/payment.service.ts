@@ -263,10 +263,15 @@ async function processPaymentSuccess(orderId: string, paymentId: string) {
       await sendOrderConfirmation(orderId);
     });
 
-    // Record the purchase against the buyer's CRM lead, also post-commit and
-    // fire-and-forget. Until this existed the CRM knew who signed up but never
-    // who bought.
-    pushPurchaseToCrm(orderId);
+    // Record the purchase against the buyer's CRM lead, also post-commit.
+    // Registered via runAfterResponse (not a bare floating promise) so the
+    // serverless instance stays alive long enough to send it — otherwise the
+    // freeze-on-response would truncate it, same failure mode documented above
+    // for the invoice send. Until this existed the CRM knew who signed up but
+    // never who bought.
+    await runAfterResponse('payment:crm-purchase', async () => {
+      await pushPurchaseToCrm(orderId);
+    });
 
     // Post-commit, registered via runAfterResponse (not a bare `void`/floating
     // promise) so the serverless instance stays alive long enough to send it —
@@ -364,34 +369,36 @@ export async function handlePaymentWebhook(razorpayOrderId: string, paymentId: s
 
 /**
  * Push a paid order to Zoho CRM. Never throws: a CRM outage must not affect a
- * payment that has already succeeded.
+ * payment that has already succeeded. Callers await this directly (it is
+ * deferred via runAfterResponse at the call site, not internally) so the
+ * work is genuinely finished before the serverless instance is allowed to freeze.
  */
-function pushPurchaseToCrm(orderId: string): void {
-  void (async () => {
-    try {
-      const [order, { pushPurchaseLeadToZoho, pushLeadSafely }] = await Promise.all([
-        Order.findById(orderId).lean(),
-        import('@/lib/zoho/zoho-crm.service'),
-      ]);
-      if (!order) return;
+async function pushPurchaseToCrm(orderId: string): Promise<void> {
+  try {
+    const [order, { pushPurchaseLeadToZoho }] = await Promise.all([
+      Order.findById(orderId).lean(),
+      import('@/lib/zoho/zoho-crm.service'),
+    ]);
+    if (!order) return;
 
-      const user = await User.findById(order.userId).select('name email phone').lean();
-      if (!user?.name || (!user.email && !user.phone)) return;
+    const user = await User.findById(order.userId).select('name email phone').lean();
+    if (!user?.name || (!user.email && !user.phone)) return;
 
-      const channels = [...new Set(order.items.map((item) => item.itemType))].join(' + ');
-      pushLeadSafely('purchase', () =>
-        pushPurchaseLeadToZoho({
-          name: user.name,
-          email: user.email ?? undefined,
-          phone: user.phone ?? undefined,
-          orderId: String(order._id),
-          amount: order.totalAmount,
-          channel: channels ? `${channels} order` : 'Order',
-          items: order.items.map((item) => ({ name: item.name, quantity: item.quantity, price: item.price })),
-        }),
-      );
-    } catch (error) {
-      console.error('[Zoho] purchase lead lookup failed:', error);
-    }
-  })();
+    const channels = [...new Set(order.items.map((item) => item.itemType))].join(' + ');
+    // Awaited directly rather than via `pushLeadSafely` — that helper is itself
+    // a fire-and-forget `void push().catch()` wrapper, which would silently
+    // reintroduce the same floating-promise bug this function exists to fix.
+    // The try/catch below reproduces its "log, never throw" behavior instead.
+    await pushPurchaseLeadToZoho({
+      name: user.name,
+      email: user.email ?? undefined,
+      phone: user.phone ?? undefined,
+      orderId: String(order._id),
+      amount: order.totalAmount,
+      channel: channels ? `${channels} order` : 'Order',
+      items: order.items.map((item) => ({ name: item.name, quantity: item.quantity, price: item.price })),
+    });
+  } catch (error) {
+    console.error('[Zoho] purchase lead push failed:', error instanceof Error ? error.message : error);
+  }
 }
