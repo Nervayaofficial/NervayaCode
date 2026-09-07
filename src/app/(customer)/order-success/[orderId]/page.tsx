@@ -40,6 +40,14 @@ export default function OrderSuccessPage() {
   useEffect(() => {
     if (!order) return;
 
+    // Nervaya's fixed test logins settle orders server-side with a
+    // `test_bypass_`-prefixed paymentId (see payment.service.ts /
+    // driftOffPayment.service.ts). meta-capi.service.ts already skips these
+    // server-side; the browser has no equivalent check, so without this a
+    // staff test order would fire a real Purchase (training Meta's optimiser
+    // on a staff phone number) and a real GA4 purchase (polluting revenue).
+    if (order.paymentId?.startsWith('test_bypass_')) return;
+
     // `purchase` must fire once per order. This effect re-runs on refresh and
     // back-navigation, and GA4 does not reliably deduplicate by transaction_id,
     // so a repeat would inflate revenue. sessionStorage (not a ref) is what
