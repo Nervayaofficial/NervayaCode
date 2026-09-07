@@ -66,19 +66,34 @@ export function buildPurchaseEvent(
 export async function sendMetaPurchaseEvent(orderId: string, paymentId: string): Promise<void> {
   const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
   const token = process.env.META_CAPI_ACCESS_TOKEN;
-  if (!pixelId || !token) return;
+  if (!pixelId || !token) {
+    // Not a failure — most environments (local/dev, unconfigured pixel) never
+    // set these. Silence must still be greppable, so it gets a line of its own
+    // rather than the same "return" every other skip in this function takes.
+    console.warn(`[meta-capi] skipped for order ${orderId}: missing pixel id or access token`);
+    return;
+  }
 
   // Test-login orders settle without Razorpay. Sending them would teach Meta's
   // optimiser that a staff phone number is a buyer.
-  if (paymentId.startsWith('test_bypass_')) return;
+  if (paymentId.startsWith('test_bypass_')) {
+    console.warn(`[meta-capi] skipped for order ${orderId}: test bypass payment id`);
+    return;
+  }
 
   try {
     const order = await Order.findById(orderId).select('items metaAttribution userId').lean();
-    if (!order) return;
+    if (!order) {
+      console.warn(`[meta-capi] skipped for order ${orderId}: order not found`);
+      return;
+    }
 
     const user = await User.findById(order.userId).select('phone email').lean();
     const event = buildPurchaseEvent(order, user);
-    if (!event) return;
+    if (!event) {
+      console.warn(`[meta-capi] skipped for order ${orderId}: no supplement line items`);
+      return;
+    }
 
     // access_token travels in the body, not the query string, so it never lands
     // in proxy access logs, fetch instrumentation, or an error message that
@@ -99,9 +114,20 @@ export async function sendMetaPurchaseEvent(orderId: string, paymentId: string):
     });
 
     if (!response.ok) {
-      console.error('Meta CAPI purchase failed:', response.status, await response.text());
+      console.error(`[meta-capi] send failed for order ${orderId}: HTTP ${response.status}`, await response.text());
+      return;
     }
+
+    // Never log the request URL, access_token, or user_data — user_data carries
+    // hashed PII and the URL used to carry the token. The identifier COUNT is
+    // safe and is what you'd actually need to debug a low Event Match Quality
+    // score, so that's what's reported, not the identifiers themselves.
+    const userData = event.user_data as Record<string, unknown> | undefined;
+    const identifierCount = userData ? Object.keys(userData).length : 0;
+    console.warn(
+      `[meta-capi] sent purchase for order ${orderId}: event_id=${event.event_id}, identifiers=${identifierCount}`,
+    );
   } catch (error) {
-    console.error('Meta CAPI purchase threw:', error);
+    console.error(`[meta-capi] send threw for order ${orderId}:`, error);
   }
 }
