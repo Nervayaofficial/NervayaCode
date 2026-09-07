@@ -383,10 +383,16 @@ async function pushPurchaseToCrm(orderId: string): Promise<void> {
       Order.findById(orderId).lean(),
       import('@/lib/zoho/zoho-crm.service'),
     ]);
-    if (!order) return;
+    if (!order) {
+      console.warn(`[payment:crm-purchase] skipped for order ${orderId}: order not found`);
+      return;
+    }
 
     const user = await User.findById(order.userId).select('name email phone').lean();
-    if (!user?.name || (!user.email && !user.phone)) return;
+    if (!user?.name || (!user.email && !user.phone)) {
+      console.warn(`[payment:crm-purchase] skipped for order ${orderId}: no contactable user`);
+      return;
+    }
 
     const channels = [...new Set(order.items.map((item) => item.itemType))].join(' + ');
 
