@@ -36,8 +36,8 @@
   background: var(--color-background);
   border: 1px solid var(--color-glass-border);
 
-  /* Let the browser own vertical scrolling; only horizontal drags reach useSwipe. */
-  touch-action: pan-y;
+  /* Let the browser own vertical scrolling and pinch-zoom; only horizontal drags reach useSwipe. */
+  touch-action: pan-y pinch-zoom;
 }
 
 .frame:focus-visible {
