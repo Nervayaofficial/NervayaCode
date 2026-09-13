@@ -9,7 +9,7 @@ import MultiImageUpload from '@/components/ImageUpload/MultiImageUpload';
 import { Icon } from '@iconify/react';
 import { ICON_SAVE_FANCY, ICON_TRASH, ICON_CAMERA, ICON_INFO, ICON_PLUS_CIRCLE } from '@/constants/icons';
 import styles from './AdminLiveEditor.module.css';
-import detailStyles from '@/app/(customer)/sleep-supplements/[id]/styles.module.css';
+import detailStyles from '@/app/(customer)/sleep-supplements/detail.module.css';
 import infoStyles from '@/components/Supplements/ProductDetail/ProductInfo/ProductInfo.module.css';
 import tabStyles from '@/components/Supplements/ProductDetail/TabDescription/TabDescription.module.css';
 import { RichTextEditor } from '@/components/common/RichTextEditor';

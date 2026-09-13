@@ -7,7 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { ICON_CART, ICON_ARROW_RIGHT, ICON_LOADING } from '@/constants/icons';
 import { useCart } from '@/context/CartContext';
-import { ROUTES } from '@/utils/routesConstants';
+import { ROUTES, supplementDetailHref } from '@/utils/routesConstants';
 import { Badge } from '@/components/common';
 import { ITEM_TYPE } from '@/lib/constants/enums';
 import type { CartItem, Supplement } from '@/types/supplement.types';
@@ -49,7 +49,7 @@ function getCartItemImage(item: CartItem): string {
 function getCartItemHref(item: CartItem): string {
   const supplement = getSupplementFromCartItem(item);
   const idStr = supplement?._id || (typeof item.itemId === 'string' ? item.itemId : undefined);
-  return item.itemType === ITEM_TYPE.SUPPLEMENT && idStr ? `/sleep-supplements/${idStr}` : ROUTES.DEEP_REST;
+  return item.itemType === ITEM_TYPE.SUPPLEMENT && idStr ? supplementDetailHref(idStr) : ROUTES.DEEP_REST;
 }
 
 function getCartItemKey(item: CartItem, index: number): string {

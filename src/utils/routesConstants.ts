@@ -100,3 +100,21 @@ export const ROUTES = {
   CHECKOUT: '/checkout',
   ORDER_SUCCESS: '/order-success',
 } as const;
+
+/**
+ * Link to a supplement's product page from a context that cannot know how many
+ * products the catalog holds (cart row, navbar cart preview).
+ *
+ * While exactly one supplement is active, `/sleep-supplements` IS that product's
+ * page, so we link straight there: the customer never sees an id in the URL and
+ * never hops through a redirect. `/sleep-supplements/<id>` still resolves — it
+ * redirects back here — so old bookmarks and indexed links keep working.
+ *
+ * When a second supplement ships, change this to `${ROUTES.SUPPLEMENTS}/${id}`
+ * and every cart link becomes product-specific again. Nothing else needs to move:
+ * `SupplementProductCard` already links by id, because it only ever renders
+ * inside the catalog, which only renders when there are 2+ products.
+ */
+export function supplementDetailHref(_id: string): string {
+  return ROUTES.SUPPLEMENTS;
+}

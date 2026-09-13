@@ -129,11 +129,10 @@ async function expectRecorderIsLive(page: Page, route: string): Promise<void> {
 
 test.describe('Meta Pixel', () => {
   test('TC-200 dataLayer items carry item_type', async ({ page }) => {
-    // The catalog holds a single product, so /sleep-supplements auto-redirects
-    // to that product's detail page — which is what fires view_item.
+    // The catalog holds a single product, so /sleep-supplements renders that
+    // product's detail view inline — which is what fires view_item.
     await page.goto('/sleep-supplements', { waitUntil: 'load' });
-    // The redirect to the product page is a client-side RSC transition (no
-    // full navigation), and the product fetch that triggers view_item lands
+    // The product fetch that triggers view_item happens client-side and lands
     // well after the `load` event on this dev server — poll instead of a
     // fixed sleep so the assertion isn't racing an arbitrary duration.
     await page.waitForFunction(() => {
@@ -260,8 +259,8 @@ test.describe('Meta Pixel (authenticated)', () => {
   test('TC-205 AddToCart carries content_ids and no therapy lines', async ({ page }) => {
     await recordFbqCalls(page);
 
-    // The catalog holds a single product, so /sleep-supplements auto-redirects
-    // to that product's detail page.
+    // The catalog holds a single product, so /sleep-supplements renders that
+    // product's detail view inline.
     await page.goto('/sleep-supplements', { waitUntil: 'load' });
     await page
       .getByRole('button', { name: /add to cart/i })
