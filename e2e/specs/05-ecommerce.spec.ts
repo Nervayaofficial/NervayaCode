@@ -4,7 +4,7 @@ import { AUTH_STATE } from '../global-setup';
 
 /** E-COMMERCE – SUPPLEMENT STORE (TC-052 .. TC-059 automatable subset).
  *  Note: the catalog currently holds a single product, so /sleep-supplements
- *  auto-redirects to that product's detail page. */
+ *  renders that product's detail view inline — same URL, no redirect. */
 
 test.describe('Supplement store (guest)', () => {
   test('TC-052 Products display on shop page', async ({ page }, testInfo) => {
@@ -19,7 +19,7 @@ test.describe('Supplement store (guest)', () => {
     recordActual(
       testInfo,
       `Shop shows product "${name.trim().slice(0, 40)}" with price=${hasPrice}; broken images=${broken}. ` +
-        `(Single-product catalog redirects to detail; register notes product images/prices pending final data.)`,
+        `(Single-product catalog renders the detail view at /sleep-supplements; register notes product images/prices pending final data.)`,
     );
     expect(hasPrice).toBe(true);
   });

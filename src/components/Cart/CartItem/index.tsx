@@ -8,6 +8,7 @@ import type { CartItem as CartItemType, Supplement } from '@/types/supplement.ty
 import { QuantitySelector } from '@/components/common';
 import { formatPrice } from '@/utils/cart.util';
 import { supplementImage } from '@/utils/supplement.util';
+import { supplementDetailHref } from '@/utils/routesConstants';
 import styles from './styles.module.css';
 
 /** Cap used for non-supplements and for supplements whose stock isn't known. */
@@ -56,7 +57,7 @@ const CartItem: React.FC<CartItemProps> = ({ item, onQuantityChange, onRemove, d
   };
 
   const itemTotal = item.price * item.quantity;
-  const productHref = isSupplement && idStr ? `/sleep-supplements/${idStr}` : '#';
+  const productHref = isSupplement && idStr ? supplementDetailHref(idStr.toString()) : '#';
 
   return (
     <div className={styles.cartItem}>

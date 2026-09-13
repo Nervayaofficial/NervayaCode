@@ -1,16 +1,19 @@
-import { redirect } from 'next/navigation';
 import { getActiveSupplements } from '@/lib/services/supplement.service';
 import type { Supplement } from '@/types/supplement.types';
 import SupplementsClient from './SupplementsClient';
+import SupplementDetailClient from './SupplementDetailClient';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Active implementation: fetches supplements on the server. When exactly one
- * supplement exists, we redirect to its detail page before any client render
- * happens (so the user never sees a catalog flash). With 0 or 2+ supplements,
- * the catalog renders via <SupplementsClient>. This already scales to the
- * multi-supplement future without further code changes.
+ * Fetches supplements on the server. When exactly one supplement exists, this
+ * route IS that product's page — it renders the detail view inline rather than
+ * redirecting, so the customer sees a clean `/sleep-supplements` URL with no
+ * product id and no redirect hop. `/sleep-supplements/[id]` stays reachable and
+ * redirects here, which keeps indexed and bookmarked links working.
+ *
+ * With 0 or 2+ supplements the catalog renders via <SupplementsClient>, and the
+ * per-id detail route takes over. Adding a second product needs no change here.
  */
 export default async function SupplementsPage() {
   let supplements: Supplement[] = [];
@@ -24,7 +27,7 @@ export default async function SupplementsPage() {
   }
 
   if (supplements.length === 1) {
-    redirect(`/sleep-supplements/${supplements[0]._id}`);
+    return <SupplementDetailClient supplementId={supplements[0]._id} />;
   }
 
   return <SupplementsClient supplements={supplements} serverError={serverError} />;
