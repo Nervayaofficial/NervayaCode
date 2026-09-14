@@ -20,7 +20,7 @@ export interface LandingPageCard {
 export const landingPageCardsData: LandingPageCard[] = [
   {
     id: 1,
-    image: IMAGES.CARD_SLEEP_SUPPLEMENTS,
+    image: IMAGES.PRODUCT_SLEEP_SUPPLEMENT,
     title: 'Sleep Supplements',
     description:
       'Our non-habit forming, fully herbal and non-melatonin formula helps you unwind naturally and drift into deep, restorative sleep. Wake up refreshed, never dependent.',
